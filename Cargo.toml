@@ -1,0 +1,18 @@
+[package]
+name = "sciflow"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.3.19", features = ["derive", "cargo"] }
+colored = "2.0.4"
+env_logger = "0.10.0"
+log = "0.4.19"
+serde = "1.0.180"
+serde_yaml = "0.9.25"
+chrono = { version ="0.4.26", features = ["serde"] }
+serde_derive = "1.0.180"
+md5 = "0.7.0"
+timeago = "0.4.1"
