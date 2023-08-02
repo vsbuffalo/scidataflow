@@ -5,6 +5,9 @@ use log::{info, trace, debug};
 use std::io::{Result,Write};
 use super::data::{DataFile,DataCollection};
 use super::utils::{load_file};
+
+use crate::traits::Status;
+
 const MANIFEST: &str = "data_manifest.yml";
 
 
@@ -105,8 +108,9 @@ impl Project {
     }
 
     pub fn status(&self) {
+        let abbrev = Some(8);
         for (key, value) in &self.data.files {
-            println!("{:?}: {:?}", key, value);
+            println!("{}", value.status(&self.path_context(), abbrev));
         }
     }
 

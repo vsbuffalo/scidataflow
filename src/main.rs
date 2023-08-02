@@ -5,6 +5,7 @@ use crate::project::Project;
 pub mod utils;
 pub mod project;
 pub mod data;
+pub mod traits;
 
 
 
