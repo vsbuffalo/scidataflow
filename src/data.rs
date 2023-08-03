@@ -21,7 +21,6 @@ pub enum StatusCode {
    Changed,
    DiskChanged,
    Updated,
-   UpdatedNotChanged,
    Deleted,
    Invalid
 }
@@ -102,12 +101,12 @@ impl Status for DataFile {
         let new_md5 = Some(DataFile::get_md5(&self.path, &path_context));
 
         let is_alive = Some(self.is_alive(&path_context));
-        debug!("old md5: {:?}, new md5: {:?}", self.md5, new_md5);
+        debug!("{:?}: old md5: {:?}, new md5: {:?}", self.path, self.md5, new_md5);
         let is_changed = self.md5 != new_md5;
 
         let old_modified = self.modified;
         let new_modified = DataFile::get_mod_time(&self.path, &path_context);
-        debug!("old mod: {:?}, new mod: {:?}", old_modified, new_md5);
+        debug!("{:?}: old mod: {:?}, new mod: {:?}", self.path, old_modified, new_modified);
 
         let md5_string = match (&self.md5, &new_md5) {
             (Some(old_md5), Some(new_md5)) if old_md5 != new_md5 => {
@@ -133,7 +132,7 @@ impl Status for DataFile {
 
         let code: StatusCode = match (&is_changed, &is_updated, &is_alive.unwrap()) {
             (false, false, true) => StatusCode::Current,
-            (false, true, true) => StatusCode::UpdatedNotChanged,
+            (false, true, true) => StatusCode::Updated,
             (true, true, true) => StatusCode::Changed,
             (true, false, true) => StatusCode::DiskChanged,
             (false, false, true) => StatusCode::Deleted,

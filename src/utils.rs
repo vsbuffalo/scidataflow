@@ -74,8 +74,7 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
                             StatusCode::Current => "current",
                             StatusCode::Changed => "changed",
                             StatusCode::DiskChanged => "changed",
-                            StatusCode::UpdatedNotChanged => "updated, not changed",
-                            StatusCode::Updated => "updated",
+                            StatusCode::Updated => "updated, not changed",
                             StatusCode::Invalid => "!INVALID!",
                             _ => &col
                         };
