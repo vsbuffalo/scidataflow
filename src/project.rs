@@ -5,8 +5,9 @@ use log::{info, trace, debug};
 use std::io::{Result,Write};
 
 use super::data::{DataFile,DataCollection};
-use crate::data::StatusEntry;
 use super::utils::{load_file,print_status};
+use super::remote::{AuthKeys};
+use crate::data::StatusEntry;
 use crate::traits::Status;
 
 const MANIFEST: &str = "data_manifest.yml";
@@ -60,12 +61,16 @@ impl Project {
         proj.save();
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) {
         let serialized_data = serde_yaml::to_string(&self.data)
             .expect("Failed to serialize data manifest!");
-        let mut file = File::create(self.manifest.clone())?;
-        write!(file, "{}", serialized_data)?;
-        Ok(())
+        let mut file = File::create(self.manifest.clone())
+            .unwrap_or_else(|_| panic!(
+                    "Failed to open file '{:?}' to write manifest", 
+                    self.manifest.to_str()
+                    .unwrap_or("[error converting PathBuf to str]")));
+        write!(file, "{}", serialized_data)
+            .expect("Failed to write data manifest!");
     }
 
     fn load(manifest: &PathBuf) -> DataCollection {
@@ -111,7 +116,7 @@ impl Project {
     pub fn status(&self) {
         let abbrev = Some(8);
         let mut rows: Vec<StatusEntry> = Vec::new();
-        for (key, value) in &self.data.files {
+        for value in self.data.files.values() {
             let entry = value.status(&self.path_context(), abbrev);
             rows.push(entry);
         }
@@ -120,11 +125,29 @@ impl Project {
 
 
     pub fn add(&mut self, filepath: &String) {
-        let msg = format!("cannot resolve path to {}", filepath);
         let filename = self.relative_path(Path::new(filepath));
 
         self.data.register(DataFile::new(filename.clone(), self.path_context()));
         self.save();
+    }
+
+    pub fn touch(&mut self, filepath: Option<&String>) {
+        let path_context = self.path_context();
+        self.data.touch(filepath, path_context);
+        self.save();
+    }
+
+    fn save_auth(key: &String) {
+    }
+
+    pub fn link(&mut self, dir: &String, service: &String, key: &String) {
+        // do two things:
+        // (1) save the auth key to home dir
+        // (2) register the remote 
+        let mut auth_keys = AuthKeys::new();
+        auth_keys.add(service, key);
+        //self.data.link_remote(dir, service, key);
+        //self.save();
     }
 }
 

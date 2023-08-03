@@ -4,6 +4,7 @@ use std::path::{Path,PathBuf};
 use std::fs::{File};
 use std::io::Read;
 use md5::{Digest, Context};
+use log::{info, trace, debug};
 use colored::*;
 use unicode_width::UnicodeWidthStr;
 
@@ -44,7 +45,7 @@ pub fn compute_md5(file_path: &Path) -> Option<String> {
 pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
-    
+
     let max_cols = rows.values()
         .flat_map(|v| v.iter())
         .map(|entry| entry.cols.len())
@@ -57,8 +58,11 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
             max_lengths[i] = max_lengths[i].max(col.width());
         }
     }
+    // debug!("max_lengths: {:?}", max_lengths);
 
     // print status table
+    let mut keys: Vec<&String> = rows.keys().collect();
+    keys.sort();
     for (key, value) in &rows {
         let pretty_key = if color { key.bold().to_string() } else { key.clone() };
         println!("[{}]", pretty_key);
@@ -66,22 +70,9 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
         // Print the rows with the correct widths
         for row in value {
             let mut fixed_row = Vec::new();
-            let mut code = &row.code;
+            let code = &row.code;
             for (i, col) in row.cols.iter().enumerate() {
-                if i == 1 { // where to put status
-                    // include the status
-                    let status_msg = match code {
-                            StatusCode::Current => "current",
-                            StatusCode::Changed => "changed",
-                            StatusCode::DiskChanged => "changed",
-                            StatusCode::Updated => "updated, not changed",
-                            StatusCode::Invalid => "!INVALID!",
-                            _ => &col
-                        };
-
-                    let status_col = format!("{:width$}", status_msg, width = max_lengths[i]);
-                    fixed_row.push(status_col)
-                }
+                // push a fixed-width column to vector
                 let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
                 fixed_row.push(fixed_col);
             }

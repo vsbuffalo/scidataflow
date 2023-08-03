@@ -87,6 +87,11 @@ impl DataFile {
             .unwrap_or_else(|| panic!("modification time is not set!"));
         modified != DataFile::get_mod_time(&self.path, &path_context)
     }
+
+    pub fn touch(&mut self, path_context: &PathBuf) {
+        let modified = DataFile::get_mod_time(&self.path, &path_context);
+        self.modified = Some(modified);
+    }
 }
 
 
@@ -124,12 +129,7 @@ impl Status for DataFile {
             _ => "".to_string(),
         };
 
-        let columns = vec![
-            self.path.to_string_lossy().to_string(),
-            md5_string,
-            modified_string,
-        ];
-
+        // calculate the status code
         let code: StatusCode = match (&is_changed, &is_updated, &is_alive.unwrap()) {
             (false, false, true) => StatusCode::Current,
             (false, true, true) => StatusCode::Updated,
@@ -138,6 +138,25 @@ impl Status for DataFile {
             (false, false, true) => StatusCode::Deleted,
             _ => StatusCode::Invalid,
         };
+
+
+        // append a status message column
+        let status_msg = match code {
+                StatusCode::Current => "current",
+                StatusCode::Changed => "changed",
+                StatusCode::DiskChanged => "changed",
+                StatusCode::Updated => "updated, not changed",
+                StatusCode::Deleted => "deleted",
+                StatusCode::Invalid => "INVALID",
+                _ => "ERROR",
+            };
+
+        let columns = vec![
+            self.path.to_string_lossy().to_string(),
+            status_msg.to_string(),
+            md5_string,
+            modified_string,
+        ];
 
         StatusEntry { code: code, cols: columns }
     }
@@ -162,6 +181,33 @@ impl DataCollection {
         self.files.insert(data_file.path.clone(), data_file);
     }
 
+    pub fn touch(&mut self, filename: Option<&String>, path_context: PathBuf) {
+        match filename {
+            Some(path) => {
+                let path: PathBuf = path.into();
+                if let Some(data_file) = self.files.get_mut(&path) {
+                    data_file.touch(&path_context);
+                    debug!("touched file {:?}", data_file.path);
+                }
+            }
+            None => {
+                // touch all files
+                let keys: Vec<_> = self.files.keys().cloned().collect();
+                for key in keys {
+                    let path: PathBuf = key.into();
+                    if let Some(data_file) = self.files.get_mut(&path) {
+                        data_file.touch(&path_context);
+                        debug!("touched file {:?}", data_file.path);
+                    }
+
+                }
+
+            }
+        }
+    }
+
+    pub fn link_remote(&mut self, dir: &String, service: &String, key: &String) {
+    }
 }
 
 
