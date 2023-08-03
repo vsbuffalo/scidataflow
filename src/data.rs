@@ -6,6 +6,7 @@ use serde_yaml;
 use serde::ser::Serializer;
 use serde::{Serialize, Deserialize, Deserializer};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use log::{info, trace, debug};
 use chrono::prelude::*;
 use std::collections::HashMap;
 use timeago::Formatter;
@@ -14,6 +15,21 @@ use std::fs;
 use crate::traits::Status;
 
 use super::utils::compute_md5;
+
+pub enum StatusCode {
+   Current,
+   Changed,
+   DiskChanged,
+   Updated,
+   UpdatedNotChanged,
+   Deleted,
+   Invalid
+}
+
+pub struct StatusEntry {
+    pub code: StatusCode,
+    pub cols: Vec<String>
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Remote {
@@ -56,13 +72,18 @@ impl DataFile {
             .into()
     }
 
-    pub fn is_changed(&self, path_context: PathBuf) -> bool {
+    pub fn is_alive(&self, path_context: &PathBuf) -> bool {
+        path_context.join(&self.path).exists()
+    }
+
+    pub fn is_changed(&self, path_context: &PathBuf) -> bool {
         let md5 = self.md5.as_deref() // TODO why deref needed?
             .unwrap_or_else(|| panic!("MD5 is not set!"));
+        debug!("{:?} has changed!", self.path);
         md5 != DataFile::get_md5(&self.path, &path_context)
     }
 
-    pub fn is_updated(&self, path_context: PathBuf) -> bool {
+    pub fn is_updated(&self, path_context: &PathBuf) -> bool {
         let modified = self.modified
             .unwrap_or_else(|| panic!("modification time is not set!"));
         modified != DataFile::get_mod_time(&self.path, &path_context)
@@ -76,17 +97,17 @@ fn shorten(hash: &String, abbrev: Option<i32>) -> String {
 }
 
 impl Status for DataFile {
-    fn status(&self, path_context: &PathBuf, n: Option<i32>) -> String {
-        let is_updated = self.is_updated(path_context.to_path_buf());
-        let mut new_md5: Option<String> = None;
-        if is_updated {
-            // lazy hashing -- if no modfication time change
-            // assume not changed (TODO: option?)
-            new_md5 = Some(DataFile::get_md5(&self.path, &path_context));
-        }
+    fn status(&self, path_context: &PathBuf, n: Option<i32>) -> StatusEntry {
+        let is_updated = self.is_updated(path_context);
+        let new_md5 = Some(DataFile::get_md5(&self.path, &path_context));
+
+        let is_alive = Some(self.is_alive(&path_context));
+        debug!("old md5: {:?}, new md5: {:?}", self.md5, new_md5);
         let is_changed = self.md5 != new_md5;
 
+        let old_modified = self.modified;
         let new_modified = DataFile::get_mod_time(&self.path, &path_context);
+        debug!("old mod: {:?}, new mod: {:?}", old_modified, new_md5);
 
         let md5_string = match (&self.md5, &new_md5) {
             (Some(old_md5), Some(new_md5)) if old_md5 != new_md5 => {
@@ -104,21 +125,22 @@ impl Status for DataFile {
             _ => "".to_string(),
         };
 
-        let status_string = match (&self.md5, &new_md5, &self.modified, &new_modified) {
-            (Some(old_md5), Some(new_md5), _, _) if old_md5 != new_md5 => "changed",
-            (_, _, Some(old_modified), new_modified) if old_modified != new_modified => "modified, not changed",
-            _ => "current",
-        };
-
         let columns = vec![
             self.path.to_string_lossy().to_string(),
             md5_string,
             modified_string,
-            status_string.to_string(),
         ];
 
-        columns.join("\t")
+        let code: StatusCode = match (&is_changed, &is_updated, &is_alive.unwrap()) {
+            (false, false, true) => StatusCode::Current,
+            (false, true, true) => StatusCode::UpdatedNotChanged,
+            (true, true, true) => StatusCode::Changed,
+            (true, false, true) => StatusCode::DiskChanged,
+            (false, false, true) => StatusCode::Deleted,
+            _ => StatusCode::Invalid,
+        };
 
+        StatusEntry { code: code, cols: columns }
     }
 }
 

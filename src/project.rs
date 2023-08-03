@@ -3,9 +3,10 @@ use std::env;
 use std::path::{Path,PathBuf};
 use log::{info, trace, debug};
 use std::io::{Result,Write};
-use super::data::{DataFile,DataCollection};
-use super::utils::{load_file};
 
+use super::data::{DataFile,DataCollection};
+use crate::data::StatusEntry;
+use super::utils::{load_file,print_status};
 use crate::traits::Status;
 
 const MANIFEST: &str = "data_manifest.yml";
@@ -109,9 +110,12 @@ impl Project {
 
     pub fn status(&self) {
         let abbrev = Some(8);
+        let mut rows: Vec<StatusEntry> = Vec::new();
         for (key, value) in &self.data.files {
-            println!("{}", value.status(&self.path_context(), abbrev));
+            let entry = value.status(&self.path_context(), abbrev);
+            rows.push(entry);
         }
+        print_status(rows);
     }
 
 
