@@ -1,12 +1,15 @@
+use std::collections::HashMap;
 use std::fs::{File,metadata,canonicalize};
-use std::env;
+use std::{env, default};
 use std::path::{Path,PathBuf};
 use log::{info, trace, debug};
+use reqwest::Response;
 use std::io::{Write};
 
+use super::remote::{Remote,FigShareAPI};
 use super::data::{DataFile,DataCollection};
 use super::utils::{load_file,print_status};
-use super::remote::{AuthKeys,initialize_remotes};
+use super::remote::{AuthKeys,initialize_remote,ResponseResult,ResponseResults};
 use crate::data::{StatusEntry,StatusCode};
 use crate::traits::Status;
 use crate::utils::{format_bytes, print_fixed_width};
@@ -53,6 +56,14 @@ impl Project {
         Ok(proj)
     }
 
+    pub fn name(&self) -> String {
+        self.manifest
+            .parent()
+            .and_then(|path| path.file_name())
+            .map(|os_str| os_str.to_string_lossy().into_owned())
+            .unwrap_or_else(|| panic!("invalid project location: is it in root?"))
+    }
+
     pub fn init() -> Result<(), String> {
         // the new manifest should be in the present directory
         let manifest: PathBuf = PathBuf::from(MANIFEST);
@@ -94,7 +105,6 @@ impl Project {
 
         let mut data = serde_yaml::from_str(&contents)
             .map_err(|e| format!("{} is malformed!\nError: {:?}", MANIFEST, e))?;
-        initialize_remotes(&mut data)?;
         Ok(data)
     }
 
@@ -166,22 +176,47 @@ impl Project {
         Ok(())
     }
 
-    pub fn link(&mut self, dir: &String, service: &String, key: &String) -> Result<(), String> {
+    pub async fn link(&mut self, dir: &String, service: &String, 
+                      key: &String, name: &Option<String>) -> Result<(), String> {
         // do two things:
         // (1) save the auth key to home dir
         // (2) register the remote 
         let mut auth_keys = AuthKeys::new();
         auth_keys.add(service, key);
-        self.data.register_remote(dir, service)?;
+
+        let service = service.to_lowercase();
+        let mut remote = match service.as_str() {
+            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
+            _ => Err(format!("Service '{}' is not supported!", service))
+        }?;
+    
+        initialize_remote(&mut remote)?;
+        // either create a project or get the project ID from FigShare
+        // and associate it with the remote
+        let default_name = self.name();
+        let project_id = remote.set_project(name.as_ref().unwrap_or(&default_name)).await?;
+
+        self.data.register_remote(dir, remote)?;
+
+        //debug!("remote: {:?}", remote);
+
+        // create a project if one doesn't exist
+        // if it exists, get the ID
+
         self.save()?;
         Ok(())
     }
 
     pub async fn ls(&mut self) -> Result<(), String> {
         for (key, remote) in &self.data.remotes {
-            match remote.get_project().await {
-                Ok(project_id) => println!("project ID = {:?}", project_id),
-                Err(err) => eprintln!("Error while getting project ID: {}", err),
+            let all_projects: ResponseResults = remote.get_projects().await;
+            match all_projects {
+                Ok(projects) => {
+                    for project in projects {
+                        println!("project ID = {:?}", project.get("id"))
+                    }
+                },
+                Err(err) => eprintln!("Error while getting projects: {}", err),
             }
         }
         Ok(())

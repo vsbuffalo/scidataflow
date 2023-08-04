@@ -197,21 +197,27 @@ impl DataCollection {
         }
     }
 
-    pub fn register_remote(&mut self, dir: &String, service: &String) -> Result<(), String> {
-        let service = service.to_lowercase();
-        let remote = match service.as_str() {
-            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
-            _ => Err(format!("Service '{}' is not supported!", service))
-        }?;
-
+    pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<(), String> {
         let path = PathBuf::from(dir);
         if self.remotes.contains_key(&path) {
-            return Err(format!("Directory '{}' is already being tracked; delete first.", dir));
+            let msg = format!("Directory '{}' is already tracked in the \
+                              data manifest. You can manually delete it \
+                              and re-add.", dir);
+            return Err(msg);
         } else {
             self.remotes.insert(path, remote);
         }
         Ok(())
     }
+
+    pub fn get_remote(&mut self, dir: &String) -> Result<&Remote, String> {
+        let path = PathBuf::from(dir);
+        match self.remotes.get(&path) {
+            Some(remote) => Ok(remote),
+            None => Err("No such remote".to_string()),
+        }
+    }
+
 }
 
 

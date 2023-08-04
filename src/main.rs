@@ -86,6 +86,8 @@ enum Commands {
         service: String,
         /// the authentication token.
         key: String,
+        /// project name for remote (default: directory name)
+        name: Option<String>
     },
     #[structopt(name = "ls")]
     /// List remotes.
@@ -98,7 +100,7 @@ enum Commands {
 pub fn print_errors(response: Result<(), String>) {
     match response {
         Ok(_) => {},
-        Err(err) => println!("Error: {}", err),
+        Err(err) => eprintln!("Error: {}", err),
     }
 }
 
@@ -139,16 +141,26 @@ async fn main() {
                 print_errors(proj.touch(filename.as_ref()));
             }
         }
-        Some(Commands::Link { dir, service, key }) => {
-            if let Ok(mut proj) = Project::new() {
-                print_errors(proj.link(dir, service, key));
+        Some(Commands::Link { dir, service, key, name }) => {
+            match Project::new() {
+                Ok(mut proj) => {
+                    print_errors(proj.link(dir, service, key, name).await);
+                },
+                Err(err) => {
+                    println!("Error while creating new project: {}", err);
+                }
             }
-
         }
         Some(Commands::Ls {}) => {
-            if let Ok(mut proj) = Project::new() {
-                print_errors(proj.ls().await);
+            match Project::new() {
+                Ok(mut proj) => {
+                    print_errors(proj.ls().await);
+                },
+                Err(err) => {
+                    println!("Error while creating new project: {}", err);
+                }
             }
+
         }
         None => {
             println!("{}\n", INFO);
