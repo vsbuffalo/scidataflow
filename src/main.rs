@@ -2,6 +2,8 @@ use clap::{Parser, Subcommand};
 use reqwest::dns::Resolve;
 use crate::project::Project;
 use structopt::StructOpt;
+use log::{info, trace, debug};
+use tokio;
 
 pub mod utils;
 pub mod project;
@@ -84,7 +86,13 @@ enum Commands {
         service: String,
         /// the authentication token.
         key: String,
-    }
+    },
+    #[structopt(name = "ls")]
+    /// List remotes.
+    Ls {
+    },
+
+
 }
 
 pub fn print_errors(response: Result<(), String>) {
@@ -94,7 +102,8 @@ pub fn print_errors(response: Result<(), String>) {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
 
@@ -111,16 +120,19 @@ fn main() {
             print_errors(Project::init());
         }
         Some(Commands::Status {  }) => {
-            if let Ok(proj) = Project::new() {
-                print_errors(proj.status());
+            match Project::new() {
+                Ok(proj) => {
+                    print_errors(proj.status());
+                },
+                Err(err) => {
+                    println!("Error while creating new project: {}", err);
+                }
             }
-
         }
         Some(Commands::Stats {  }) => {
             if let Ok(proj) = Project::new() {
                 print_errors(proj.stats());
             }
-
         }
         Some(Commands::Touch { filename }) => {
             if let Ok(mut proj) = Project::new() {
@@ -132,6 +144,11 @@ fn main() {
                 print_errors(proj.link(dir, service, key));
             }
 
+        }
+        Some(Commands::Ls {}) => {
+            if let Ok(mut proj) = Project::new() {
+                print_errors(proj.ls().await);
+            }
         }
         None => {
             println!("{}\n", INFO);

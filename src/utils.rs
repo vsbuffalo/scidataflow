@@ -115,14 +115,11 @@ pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<PathBuf,Remo
 
     let organized_rows = organize_by_dir(rows);
 
-    info!("remotes: {:?}", remote);
     let rows_by_dir: HashMap<String, Vec<StatusEntry>> = match remote {
         Some(remote_map) => {
             let mut new_map = HashMap::new();
             for (key, value) in organized_rows {
-                info!("key={:?}", key);
                 if let Some(remote) = remote_map.get(&PathBuf::from(&key)) {
-                    info!("found remote: {:?}", remote);
                     let new_key = format!("{} > {}", key, remote.name());
                     new_map.insert(new_key, value);
                 } else {

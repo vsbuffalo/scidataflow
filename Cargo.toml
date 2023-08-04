@@ -16,7 +16,9 @@ chrono = { version ="0.4.26", features = ["serde"] }
 serde_derive = "1.0.180"
 md5 = "0.7.0"
 timeago = "0.4.1"
-reqwest = "0.11.18"
+reqwest = { version = "0.11.18", features = ["json"] }
 unicode-width = "0.1.10"
-tokio = "1.29.1"
+tokio = { version = "*", features = ["full"] }
 structopt = "0.3.26"
+async-trait = "0.1"
+

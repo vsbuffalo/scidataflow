@@ -5,10 +5,3 @@ use super::data::StatusEntry;
 pub trait Status {
     fn status(&self, path_context: &PathBuf, abbrev: Option<i32>) -> StatusEntry;
 }
-
-/// Traits for interacting with Remote APIs
-pub trait RemoteAPI {
-    fn upload(&self);
-    fn download(&self);
-}
-

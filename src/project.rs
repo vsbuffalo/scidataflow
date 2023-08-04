@@ -6,7 +6,7 @@ use std::io::{Write};
 
 use super::data::{DataFile,DataCollection};
 use super::utils::{load_file,print_status};
-use super::remote::{AuthKeys};
+use super::remote::{AuthKeys,initialize_remotes};
 use crate::data::{StatusEntry,StatusCode};
 use crate::traits::Status;
 use crate::utils::{format_bytes, print_fixed_width};
@@ -92,8 +92,10 @@ impl Project {
             return Ok(DataCollection::new());
         }
 
-        serde_yaml::from_str(&contents)
-            .map_err(|e| format!("{} is malformed!\nError: {:?}", MANIFEST, e))
+        let mut data = serde_yaml::from_str(&contents)
+            .map_err(|e| format!("{} is malformed!\nError: {:?}", MANIFEST, e))?;
+        initialize_remotes(&mut data)?;
+        Ok(data)
     }
 
     /// Get the absolute path context of the current project.
@@ -174,5 +176,16 @@ impl Project {
         self.save()?;
         Ok(())
     }
+
+    pub async fn ls(&mut self) -> Result<(), String> {
+        for (key, remote) in &self.data.remotes {
+            match remote.get_project().await {
+                Ok(project_id) => println!("project ID = {:?}", project_id),
+                Err(err) => eprintln!("Error while getting project ID: {}", err),
+            }
+        }
+        Ok(())
+    }
+
 }
 
