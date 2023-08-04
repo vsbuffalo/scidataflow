@@ -9,6 +9,7 @@ use colored::*;
 use unicode_width::UnicodeWidthStr;
 
 use crate::data::{StatusEntry, StatusCode};
+use super::remote::{Remote};
 
 const BUFFER_SIZE: usize = 4096;
 
@@ -108,9 +109,51 @@ fn organize_by_dir(rows: Vec<StatusEntry>) -> HashMap<String, Vec<StatusEntry>> 
     dir_map
 }
 
-pub fn print_status(rows: Vec<StatusEntry>) {
+pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<PathBuf,Remote>>) {
     println!("{}", "Project data status:".bold());
     println!("{} data file{} tracked.\n", rows.len(), if rows.len() > 1 {"s"} else {""});
-    let rows_by_dir = organize_by_dir(rows);
-    print_fixed_width(rows_by_dir, None, None, false);
+
+    let organized_rows = organize_by_dir(rows);
+
+    info!("remotes: {:?}", remote);
+    let rows_by_dir: HashMap<String, Vec<StatusEntry>> = match remote {
+        Some(remote_map) => {
+            let mut new_map = HashMap::new();
+            for (key, value) in organized_rows {
+                info!("key={:?}", key);
+                if let Some(remote) = remote_map.get(&PathBuf::from(&key)) {
+                    info!("found remote: {:?}", remote);
+                    let new_key = format!("{} > {}", key, remote.name());
+                    new_map.insert(new_key, value);
+                } else {
+                    new_map.insert(key, value);
+                }
+            }
+            new_map
+        },
+        None => organized_rows,
+    };
+
+    print_fixed_width(rows_by_dir, None, None, true);
+}
+
+pub fn format_bytes(size: u64) -> String {
+    const BYTES_IN_KB: f64 = 1024.0;
+    const BYTES_IN_MB: f64 = BYTES_IN_KB * 1024.0;
+    const BYTES_IN_GB: f64 = BYTES_IN_MB * 1024.0;
+    const BYTES_IN_TB: f64 = BYTES_IN_GB * 1024.0;
+    const BYTES_IN_PB: f64 = BYTES_IN_TB * 1024.0;
+    let size = size as f64;
+
+    if size < BYTES_IN_MB {
+        return format!("{:.2} MB", size / BYTES_IN_KB);
+    } else if size < BYTES_IN_GB {
+        return format!("{:.2} MB", size / BYTES_IN_MB);
+    } else if size < BYTES_IN_TB {
+        return format!("{:.2} GB", size / BYTES_IN_GB);
+    } else if size < BYTES_IN_PB {
+        return format!("{:.2} TB", size / BYTES_IN_TB);
+    } else {
+        return format!("{:.2} PB", size / BYTES_IN_PB);
+    }
 }

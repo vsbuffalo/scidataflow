@@ -8,6 +8,7 @@ pub trait Status {
 
 /// Traits for interacting with Remote APIs
 pub trait RemoteAPI {
-    fn upload(&self, file_path: &str) -> Result<(), Box<dyn std::error::Error>>;
-    fn download(&self, file_id: &str, destination_path: &str) -> Result<(), Box<dyn std::error::Error>>;
+    fn upload(&self);
+    fn download(&self);
 }
+

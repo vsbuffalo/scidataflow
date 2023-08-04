@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use reqwest::dns::Resolve;
 use crate::project::Project;
 use structopt::StructOpt;
 
@@ -7,6 +8,30 @@ pub mod project;
 pub mod data;
 pub mod traits;
 pub mod remote;
+
+const INFO: &str = "\
+SciFlow: Manage and Share Scientific Data
+usage: scf [--help] <subcommand>
+
+Some examples:
+
+  # initialize a new project
+  scf init
+
+  # get data status
+  scf status
+
+  # get data sizes, etc.
+  scf stats
+
+  # pull in data
+  scf pull
+ 
+  # link the directory data/supplement/ to figshare 
+  # use the given token
+  scf link  data/supplement figshare <token> [--name figshare project name]
+
+";
 
 
 #[derive(Parser)]
@@ -38,6 +63,11 @@ enum Commands {
     Status {
     },
 
+    #[structopt(name = "stats")]
+    /// Show status of data.
+    Stats {
+    },
+
     #[structopt(name = "touch")]
     /// Update modification times.
     Touch {
@@ -57,6 +87,12 @@ enum Commands {
     }
 }
 
+pub fn print_errors(response: Result<(), String>) {
+    match response {
+        Ok(_) => {},
+        Err(err) => println!("Error: {}", err),
+    }
+}
 
 fn main() {
     env_logger::init();
@@ -67,25 +103,40 @@ fn main() {
 
     match &cli.command {
         Some(Commands::Add { filename }) => {
-            let mut dc = Project::new();
-            dc.add(filename);
+            if let Ok(mut proj) = Project::new() {
+                print_errors(proj.add(filename));
+            }
         }
         Some(Commands::Init {  }) => {
-            Project::init();
+            print_errors(Project::init());
         }
         Some(Commands::Status {  }) => {
-            let dc = Project::new();
-            dc.status();
+            if let Ok(proj) = Project::new() {
+                print_errors(proj.status());
+            }
+
+        }
+        Some(Commands::Stats {  }) => {
+            if let Ok(proj) = Project::new() {
+                print_errors(proj.stats());
+            }
+
         }
         Some(Commands::Touch { filename }) => {
-            let mut dc = Project::new();
-            dc.touch(filename.as_ref());
+            if let Ok(mut proj) = Project::new() {
+                print_errors(proj.touch(filename.as_ref()));
+            }
         }
         Some(Commands::Link { dir, service, key }) => {
-            let mut dc = Project::new();
-            dc.link(dir, service, key)
+            if let Ok(mut proj) = Project::new() {
+                print_errors(proj.link(dir, service, key));
+            }
+
         }
-        None => {}
+        None => {
+            println!("{}\n", INFO);
+            std::process::exit(1);
+        }
     }
 
 

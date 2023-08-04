@@ -9,6 +9,8 @@ use reqwest::Error;
 use serde_derive::{Serialize,Deserialize};
 use tokio;
 
+use crate::traits::RemoteAPI;
+
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -55,53 +57,50 @@ impl AuthKeys {
             .unwrap_or_else(|_| panic!("Cound not write {}!", AUTHKEYS));
     }
 }
-/*
-pub struct RequestHandler {
-    client: reqwest::Client,
-    auth_key: AuthKey,
+
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum Remote {
+    FigShareAPI(FigShareAPI),
+    DataDryadAPI(DataDryadAPI),
 }
 
-impl RequestHandler {
-    pub fn new(auth_key_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let client = reqwest::Client::new();
-        let auth_key = fs::read_to_string(auth_key_path)?;
-
-        Ok(Self { client, auth_key })
+impl Remote {
+    pub fn name(&self) -> &str {
+        match self {
+            Remote::FigShareAPI(_) => "FigShare",
+            Remote::DataDryadAPI(_) => "Dryad",
+        }
     }
-
-    pub async fn get(&self, url: &str) -> Result<String, Box<dyn Error>> {
-        let res = self.client.get(url).send().await?;
-        let body = res.text().await?;
-        Ok(body)
-    }
-
-    pub async fn post(&self, url: &str, body: &str) -> Result<String, Box<dyn Error>> {
-        let res = self.client.post(url).body(String::from(body)).send().await?;
-        let body = res.text().await?;
-        Ok(body)
-    }
-
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct FigShareAPI {
-    request_handler: RequestHandler,
+    base_url: String,
 }
 
 impl FigShareAPI {
-    pub fn new(auth_key: &String) -> Self {
-        Self {
-            request_handler: RequestHandler::new(),
+    pub fn new() -> Self {
+        FigShareAPI { 
+            base_url: "https://api.figshare.com/v2/".to_string(),
         }
     }
 }
 
 impl RemoteAPI for FigShareAPI {
-    fn upload() -> Result<(), Box<dyn std::error::Error>> {
-        // implement upload for figshare
+    fn upload(&self) {
     }
+    fn download(&self) {
+    }
+}
 
-    fn download() -> Result<(), Box<dyn std::error::Error>> {
-        // implement download for figshare
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct DataDryadAPI;
+impl RemoteAPI for DataDryadAPI {
+    fn upload(&self) {
     }
-} */
+    fn download(&self) {
+    }
+}
+
 

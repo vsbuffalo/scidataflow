@@ -1,20 +1,14 @@
-use std::alloc::System;
-use std::fmt;
-use std::path::{Path,PathBuf};
+use std::path::{PathBuf};
 use serde_derive::{Serialize,Deserialize};
-use serde_yaml;
-use serde::ser::Serializer;
-use serde::{Serialize, Deserialize, Deserializer};
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use log::{info, trace, debug};
 use chrono::prelude::*;
 use std::collections::HashMap;
-use timeago::Formatter;
 use std::fs;
 
 use crate::traits::Status;
 
 use super::utils::compute_md5;
+use super::remote::{Remote,FigShareAPI};
 
 pub enum StatusCode {
    Current,
@@ -29,12 +23,6 @@ pub struct StatusEntry {
     pub code: StatusCode,
     pub cols: Vec<String>
 }
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct Remote {
-    service: String,
-}
-
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataFile {
@@ -135,7 +123,7 @@ impl Status for DataFile {
             (false, true, true) => StatusCode::Updated,
             (true, true, true) => StatusCode::Changed,
             (true, false, true) => StatusCode::DiskChanged,
-            (false, false, true) => StatusCode::Deleted,
+            (false, false, false) => StatusCode::Deleted,
             _ => StatusCode::Invalid,
         };
 
@@ -162,13 +150,16 @@ impl Status for DataFile {
     }
 }
 
+/// DataCollection structure for managing the data manifest 
+/// and how it talks to the outside world.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataCollection {
     pub files: HashMap<PathBuf, DataFile>,
     pub remotes: HashMap<PathBuf, Remote>,
-
 }
 
+/// DataCollection methods: these should *only* be for 
+/// interacting with the data manifest (including remotes).
 impl DataCollection {
     pub fn new() -> Self {
         Self {
@@ -206,7 +197,20 @@ impl DataCollection {
         }
     }
 
-    pub fn link_remote(&mut self, dir: &String, service: &String, key: &String) {
+    pub fn register_remote(&mut self, dir: &String, service: &String) -> Result<(), String> {
+        let service = service.to_lowercase();
+        let remote = match service.as_str() {
+            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
+            _ => Err(format!("Service '{}' is not supported!", service))
+        }?;
+
+        let path = PathBuf::from(dir);
+        if self.remotes.contains_key(&path) {
+            return Err(format!("Directory '{}' is already being tracked; delete first.", dir));
+        } else {
+            self.remotes.insert(path, remote);
+        }
+        Ok(())
     }
 }
 
