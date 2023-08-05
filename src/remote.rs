@@ -13,6 +13,7 @@ use reqwest::{Client, Response, Error };
 use reqwest::{StatusCode};
 use tokio;
 
+use crate::project;
 use crate::tokio::io::ErrorKind;
 use super::data::DataCollection;
 
@@ -73,6 +74,8 @@ pub enum Remote {
     DataDryadAPI(DataDryadAPI),
 }
 
+// NOTE: these are not implemented as traits because many are async, and
+// it looked like this wasn't implemented yet.
 impl Remote {
     pub fn name(&self) -> &str {
         match self {
@@ -101,6 +104,16 @@ impl Remote {
         }
     }
 
+   pub async fn get_files(&mut self) -> Result<Vec<String>,String> {
+        match self {
+            Remote::FigShareAPI(figshare_api) => figshare_api.get_files().await,
+            Remote::DataDryadAPI(_) => Err("DataDryadAPI does not support get_project method".to_string()),
+        }
+    }
+
+   pub async fn track(&mut self) -> Result<(),String> {
+       Ok(())
+   }
 
 }
 
@@ -269,6 +282,29 @@ impl FigShareAPI {
         Ok(project_id)
     }
 
+    pub async fn get_files(&self) -> Result<Vec<String>,String>{
+        let project_id = self.project_id; 
+        let url = format!("/account/projects/{}/articles", project_id.unwrap().to_string());
+
+        let response = match self.issue_request(Method::GET, &url, None).await {
+            Ok(response) => response,
+            Err(err) => {
+                eprintln!("Error while getting files: {}", err);
+                return Err(err.to_string());
+            }
+        };
+        debug!("get_files() response: {:?}", response);
+        let data = response.json::<Value>()
+            .await
+            .map_err(|e| format!("json error: {:?}", e))?;
+        let res = Vec::new();
+        Ok(res)
+    }
+
+    pub async fn track(&self) -> Result<(),String> {
+        Ok(())
+    }
+
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -279,7 +315,7 @@ pub struct DataDryadAPI {
     token: String
 }
 
-pub fn initialize_remote(remote: &mut Remote) -> Result<(), String> {
+pub fn authenticate_remote(remote: &mut Remote) -> Result<(), String> {
     // Get they keys off disk
     let auth_keys = AuthKeys::new();
     match remote {
@@ -290,13 +326,6 @@ pub fn initialize_remote(remote: &mut Remote) -> Result<(), String> {
         },
         // handle other Remote variants as necessary
         _ => {},
-    }
-    Ok(())
-}
-
-pub fn initialize_remotes(data_collection: &mut DataCollection) -> Result<(), String> {
-    for remote in data_collection.remotes.values_mut() {
-        initialize_remote(remote)?;
     }
     Ok(())
 }

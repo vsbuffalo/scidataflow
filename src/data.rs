@@ -29,7 +29,7 @@ pub struct DataFile {
     path: PathBuf,
     tracked: bool,
     md5: Option<String>,
-    modified: Option<DateTime<Utc>>,
+    //modified: Option<DateTime<Utc>>,
 }
 
 
@@ -41,7 +41,7 @@ impl DataFile {
             path: path,
             tracked: true, 
             md5: Some(md5),
-            modified: Some(modified)
+            //modified: Some(modified)
         }
     }
 
@@ -70,16 +70,16 @@ impl DataFile {
         md5 != DataFile::get_md5(&self.path, &path_context)
     }
 
-    pub fn is_updated(&self, path_context: &PathBuf) -> bool {
-        let modified = self.modified
-            .unwrap_or_else(|| panic!("modification time is not set!"));
-        modified != DataFile::get_mod_time(&self.path, &path_context)
-    }
+    //pub fn is_updated(&self, path_context: &PathBuf) -> bool {
+    //    let modified = self.modified
+    //        .unwrap_or_else(|| panic!("modification time is not set!"));
+    //    modified != DataFile::get_mod_time(&self.path, &path_context)
+    //}
 
-    pub fn touch(&mut self, path_context: &PathBuf) {
-        let modified = DataFile::get_mod_time(&self.path, &path_context);
-        self.modified = Some(modified);
-    }
+    //pub fn touch(&mut self, path_context: &PathBuf) {
+    //    let modified = DataFile::get_mod_time(&self.path, &path_context);
+    //    self.modified = Some(modified);
+    //}
 }
 
 
@@ -90,16 +90,16 @@ fn shorten(hash: &String, abbrev: Option<i32>) -> String {
 
 impl Status for DataFile {
     fn status(&self, path_context: &PathBuf, n: Option<i32>) -> StatusEntry {
-        let is_updated = self.is_updated(path_context);
+        //let is_updated = self.is_updated(path_context);
         let new_md5 = Some(DataFile::get_md5(&self.path, &path_context));
 
         let is_alive = Some(self.is_alive(&path_context));
         debug!("{:?}: old md5: {:?}, new md5: {:?}", self.path, self.md5, new_md5);
         let is_changed = self.md5 != new_md5;
 
-        let old_modified = self.modified;
+        //let old_modified = self.modified;
         let new_modified = DataFile::get_mod_time(&self.path, &path_context);
-        debug!("{:?}: old mod: {:?}, new mod: {:?}", self.path, old_modified, new_modified);
+        //debug!("{:?}: old mod: {:?}, new mod: {:?}", self.path, old_modified, new_modified);
 
         let md5_string = match (&self.md5, &new_md5) {
             (Some(old_md5), Some(new_md5)) if old_md5 != new_md5 => {
@@ -109,23 +109,24 @@ impl Status for DataFile {
             _ => "".to_string(),
         };
 
-        let modified_string = match (&self.modified, &new_modified) {
-            (Some(old_modified), new_modified) if old_modified != new_modified => {
-                format!("{} > {}", old_modified, new_modified)
-            },
-            (Some(modified), _) => format!("{}", modified),
-            _ => "".to_string(),
-        };
+        //let modified_string = match (&self.modified, &new_modified) {
+        //    (Some(old_modified), new_modified) if old_modified != new_modified => {
+        //        format!("{} > {}", old_modified, new_modified)
+        //    },
+        //    (Some(modified), _) => format!("{}", modified),
+        //    _ => "".to_string(),
+        //};
+        let modified_string = format!("{}", new_modified);
 
         // calculate the status code
-        let code: StatusCode = match (&is_changed, &is_updated, &is_alive.unwrap()) {
-            (false, false, true) => StatusCode::Current,
-            (false, true, true) => StatusCode::Updated,
-            (true, true, true) => StatusCode::Changed,
-            (true, false, true) => StatusCode::DiskChanged,
-            (false, false, false) => StatusCode::Deleted,
-            _ => StatusCode::Invalid,
-        };
+        //let code: StatusCode = match (&is_changed, &is_updated, &is_alive.unwrap()) {
+        //    (false, false, true) => StatusCode::Current,
+        //    (false, true, true) => StatusCode::Updated,
+        //    (true, true, true) => StatusCode::Changed,
+        //    (true, false, true) => StatusCode::DiskChanged,
+        //    (false, false, false) => StatusCode::Deleted,
+        //    _ => StatusCode::Invalid,
+        //};
 
 
         // append a status message column

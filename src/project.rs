@@ -9,7 +9,7 @@ use std::io::{Write};
 use super::remote::{Remote,FigShareAPI};
 use super::data::{DataFile,DataCollection};
 use super::utils::{load_file,print_status};
-use super::remote::{AuthKeys,initialize_remote,ResponseResult,ResponseResults};
+use super::remote::{AuthKeys,authenticate_remote,ResponseResult,ResponseResults};
 use crate::data::{StatusEntry,StatusCode};
 use crate::traits::Status;
 use crate::utils::{format_bytes, print_fixed_width};
@@ -178,46 +178,44 @@ impl Project {
 
     pub async fn link(&mut self, dir: &String, service: &String, 
                       key: &String, name: &Option<String>) -> Result<(), String> {
-        // do two things:
         // (1) save the auth key to home dir
-        // (2) register the remote 
         let mut auth_keys = AuthKeys::new();
         auth_keys.add(service, key);
 
+        // (2) create a new remote 
         let service = service.to_lowercase();
         let mut remote = match service.as_str() {
             "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
             _ => Err(format!("Service '{}' is not supported!", service))
         }?;
     
-        initialize_remote(&mut remote)?;
-        // either create a project or get the project ID from FigShare
-        // and associate it with the remote
+        // (3) authenticate remote
+        authenticate_remote(&mut remote)?;
+        // (4) associate a project (either by creating it, or finding it on
+        // FigShare)
         let default_name = self.name();
         let project_id = remote.set_project(name.as_ref().unwrap_or(&default_name)).await?;
 
+        // (4) register the remote in the manifest
         self.data.register_remote(dir, remote)?;
-
-        //debug!("remote: {:?}", remote);
-
-        // create a project if one doesn't exist
-        // if it exists, get the ID
-
         self.save()?;
         Ok(())
     }
 
     pub async fn ls(&mut self) -> Result<(), String> {
-        for (key, remote) in &self.data.remotes {
-            let all_projects: ResponseResults = remote.get_projects().await;
-            match all_projects {
-                Ok(projects) => {
-                    for project in projects {
-                        println!("project ID = {:?}", project.get("id"))
-                    }
-                },
-                Err(err) => eprintln!("Error while getting projects: {}", err),
-            }
+        for (key, remote) in &mut self.data.remotes {
+            //let all_projects: ResponseResults = remote.get_projects().await;
+            //match all_projects {
+            //    Ok(projects) => {
+            //        for project in projects {
+            //            println!("project ID = {:?}", project.get("id"))
+            //        }
+            //    },
+            //    Err(err) => eprintln!("Error while getting projects: {}", err),
+            //}
+        authenticate_remote(remote)?;
+            let files = remote.get_files().await?;
+            println!("files:\n{:?}", files);
         }
         Ok(())
     }
