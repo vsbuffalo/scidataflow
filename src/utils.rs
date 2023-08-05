@@ -1,9 +1,11 @@
 use std::collections::HashMap;
-use std::os::macos::raw::stat;
+use anyhow::{anyhow,Result};
+use chrono::{Duration, Utc,Local};
+use timeago::Formatter;
 use std::path::{Path,PathBuf};
 use std::fs::{File};
 use std::io::Read;
-use md5::{Digest, Context};
+use md5::{Context};
 use log::{info, trace, debug};
 use colored::*;
 use unicode_width::UnicodeWidthStr;
@@ -21,10 +23,13 @@ pub fn load_file(path: &PathBuf) -> String {
     contents
 }
 
-pub fn compute_md5(file_path: &Path) -> Option<String> {
+/// Compute the MD5 of a file returning None if the file is empty.
+pub fn compute_md5(file_path: &Path) -> Result<Option<String>> {
+    const BUFFER_SIZE: usize = 1024;
+
     let mut file = match File::open(file_path) {
         Ok(file) => file,
-        Err(_) => return None,
+        Err(_) => return Ok(None),
     };
 
     let mut buffer = [0; BUFFER_SIZE];
@@ -34,13 +39,14 @@ pub fn compute_md5(file_path: &Path) -> Option<String> {
         let bytes_read = match file.read(&mut buffer) {
             Ok(0) => break, // EOF
             Ok(bytes_read) => bytes_read,
-            Err(_) => return None,
+            Err(e) => return Err(anyhow!("I/O reading file!".to_string())),
         };
 
         md5.consume(&buffer[..bytes_read]);
     }
+    
     let result = md5.compute();
-    Some(format!("{:x}", result))
+    Ok(Some(format!("{:x}", result)))
 }
 
 pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
@@ -71,7 +77,7 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
         // Print the rows with the correct widths
         for row in value {
             let mut fixed_row = Vec::new();
-            let code = &row.code;
+            let status = &row.status;
             for (i, col) in row.cols.iter().enumerate() {
                 // push a fixed-width column to vector
                 let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
@@ -81,11 +87,9 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
 
             // color row
             let status_line = fixed_row.join(&spacer);
-            let status_line = match code {
+            let status_line = match status {
                     StatusCode::Current => status_line.green().to_string(),
                     StatusCode::Changed => status_line.red().to_string(),
-                    StatusCode::DiskChanged => status_line.bright_red().to_string(),
-                    StatusCode::Updated => status_line.yellow().to_string(),
                     _ => status_line
             };
             println!("{}{}", " ".repeat(indent), status_line);
@@ -153,4 +157,21 @@ pub fn format_bytes(size: u64) -> String {
     } else {
         return format!("{:.2} PB", size / BYTES_IN_PB);
     }
+}
+
+
+pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
+    let now = Utc::now();
+    let duration_since_mod = now.signed_duration_since(mod_time);
+    
+    // convert chrono::Duration to std::time::Duration
+    let std_duration = std::time::Duration::new(
+        duration_since_mod.num_seconds() as u64,
+        0
+    );
+    
+    let formatter = Formatter::new();
+    let local_time = mod_time.with_timezone(&Local);
+    let timestamp = local_time.format("%Y-%m-%d %l:%M%p").to_string();
+    format!("{} ({})", formatter.convert(std_duration), timestamp)
 }

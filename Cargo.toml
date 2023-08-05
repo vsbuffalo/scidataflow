@@ -22,4 +22,5 @@ tokio = { version = "*", features = ["full"] }
 structopt = "0.3.26"
 async-trait = "0.1"
 serde_json = "1.0.104"
+anyhow = "1.0.72"
 

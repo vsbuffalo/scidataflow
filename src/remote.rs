@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::env;
+use anyhow::{anyhow,Result};
 use log::{info, trace, debug};
 use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
@@ -65,8 +66,8 @@ impl AuthKeys {
     }
 }
 
-pub type ResponseResult = Result<Value, String>;
-pub type ResponseResults = Result<Vec<Value>, String>;
+pub type ResponseResult = Result<Value>;
+pub type ResponseResults = Result<Vec<Value>>;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Remote {
@@ -86,28 +87,28 @@ impl Remote {
     pub async fn get_projects(&self) -> ResponseResults {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.get_projects().await,
-            Remote::DataDryadAPI(_) => Err("DataDryadAPI does not support get_project method".to_string()),
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
 
     pub async fn create_project(&self, dir: &String) -> ResponseResult {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.create_project(dir).await,
-            Remote::DataDryadAPI(_) => Err("DataDryadAPI does not support get_project method".to_string()),
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
 
-    pub async fn set_project(&mut self, dir: &String) -> Result<i64,String> {
+    pub async fn set_project(&mut self, dir: &String) -> Result<i64> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.set_project(dir).await,
-            Remote::DataDryadAPI(_) => Err("DataDryadAPI does not support get_project method".to_string()),
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
 
-   pub async fn get_files(&mut self) -> Result<Vec<String>,String> {
+   pub async fn get_files(&mut self) -> Result<Vec<String>> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.get_files().await,
-            Remote::DataDryadAPI(_) => Err("DataDryadAPI does not support get_project method".to_string()),
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
 
@@ -147,7 +148,7 @@ impl FigShareAPI {
     }
 
     async fn issue_request(&self, method: Method, url: &str, data: Option<HashMap<String, String>>) 
-        -> Result<Response, String> {
+        -> Result<Response> {
             let mut headers = HeaderMap::new();
             let url = url.trim_start_matches('/');
             let full_url = format!("{}{}", self.base_url, url);
@@ -165,18 +166,18 @@ impl FigShareAPI {
                     .headers(headers)
                     .json(&data)
                     .send()
-                    .await.map_err(|e| format!("request error: {:?}", e))?,
+                    .await?,
                 None => client.request(method, &full_url)
                     .headers(headers)
                     .send()
-                    .await.map_err(|e| format!("no data error: {:?}", e))?,
+                    .await?,
             };
 
             let response_status = response.status();
             if response_status.is_success() {
                 Ok(response)
             } else {
-                Err(format!("HTTP Error: {}", response_status))
+                Err(anyhow!("HTTP Error: {}", response_status))
             }
         }
 
@@ -193,18 +194,15 @@ impl FigShareAPI {
         let response = match self.issue_request(Method::GET, &url, None).await {
             Ok(response) => response,
             Err(err) => {
-                eprintln!("Error while fetching project: {}", err);
-                return Err(err.to_string());
+                return Err(anyhow!("Error while fetching project: {}", err));
             }
         };
         debug!("reponse: {:?}", response);
-        let data = response.json::<Vec<Value>>()
-            .await
-            .map_err(|e| format!("json error: {:?}", e))?;
+        let data = response.json::<Vec<Value>>().await?;
         Ok(data)
     }
 
-    pub async fn check_project_exists(&self, title: &String) -> Result<Option<i64>, String> {
+    pub async fn check_project_exists(&self, title: &String) -> Result<Option<i64>> {
         let projects = self.get_projects().await?;
         //info!("PROJECTS: {:?}", projects);
         let project = projects.iter().find(|project| {
@@ -233,7 +231,7 @@ impl FigShareAPI {
         let existing_id = self.check_project_exists(title).await?;
         debug!("existing_id: {:?}", existing_id);
         if existing_id.is_some() {
-            return Err(format!("A project with the title '{}' already exists", title));
+            return Err(anyhow!("A project with the title '{}' already exists", title));
         }
 
         let url = "/account/projects";
@@ -247,19 +245,16 @@ impl FigShareAPI {
         let response = match self.issue_request(Method::POST, &url, Some(data)).await {
             Ok(response) => response,
             Err(err) => {
-                eprintln!("Error while creating project: {}", err);
-                return Err(err.to_string());
+                return Err(anyhow!("Error while creating project: {}", err));
             }
         };
         debug!("response: {:?}", response);
-        let data = response.json::<Value>()
-            .await
-            .map_err(|e| format!("json error: {:?}", e))?;
+        let data = response.json::<Value>().await?;
         info!("created remote project: {:?}", title);
         Ok(data)
     }
 
-    pub async fn set_project(&mut self, title: &String) -> Result<i64, String> {
+    pub async fn set_project(&mut self, title: &String) -> Result<i64> {
         let existing_id = self.check_project_exists(title).await?;
         let project_id = match existing_id {
             Some(id) => {
@@ -270,11 +265,11 @@ impl FigShareAPI {
                 Ok(data) => match data.get("entity_id") {
                     Some(value) => match value.as_i64() {
                         Some(id) => Ok(id),
-                        None => Err("Entity id is not an integer".to_string()),
+                        None => Err(anyhow!("Entity id is not an integer")),
                     },
-                    None => Err("Entity id is missing".to_string()),
+                    None => Err(anyhow!("Entity id is missing")),
                 },
-                Err(err) => Err(format!("Invalid response: {}", err)),
+                Err(err) => Err(anyhow!("Invalid response: {}", err)),
             },
         }?;
 
@@ -282,26 +277,24 @@ impl FigShareAPI {
         Ok(project_id)
     }
 
-    pub async fn get_files(&self) -> Result<Vec<String>,String>{
+    pub async fn get_files(&self) -> Result<Vec<String>> {
         let project_id = self.project_id; 
         let url = format!("/account/projects/{}/articles", project_id.unwrap().to_string());
 
         let response = match self.issue_request(Method::GET, &url, None).await {
             Ok(response) => response,
             Err(err) => {
-                eprintln!("Error while getting files: {}", err);
-                return Err(err.to_string());
+                return Err(anyhow!("Error while getting files: {}", err));
             }
         };
         debug!("get_files() response: {:?}", response);
         let data = response.json::<Value>()
-            .await
-            .map_err(|e| format!("json error: {:?}", e))?;
+            .await?;
         let res = Vec::new();
         Ok(res)
     }
 
-    pub async fn track(&self) -> Result<(),String> {
+    pub async fn track(&self) -> Result<()> {
         Ok(())
     }
 
@@ -315,13 +308,13 @@ pub struct DataDryadAPI {
     token: String
 }
 
-pub fn authenticate_remote(remote: &mut Remote) -> Result<(), String> {
+pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
     // Get they keys off disk
     let auth_keys = AuthKeys::new();
     match remote {
         Remote::FigShareAPI(ref mut figshare_api) => {
             let token = auth_keys.keys.get("figshare").cloned()
-                .ok_or("Expected figshare key not found")?;
+                .ok_or_else(|| anyhow::anyhow!("Expected figshare key not found"))?;
             figshare_api.set_token(token);
         },
         // handle other Remote variants as necessary

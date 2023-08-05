@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use reqwest::dns::Resolve;
+use anyhow::Result;
 use crate::project::Project;
 use structopt::StructOpt;
 use log::{info, trace, debug};
@@ -70,10 +71,10 @@ enum Commands {
     Stats {
     },
 
-    #[structopt(name = "touch")]
-    /// Update modification times.
-    Touch {
-        /// Which file to touch (if not set, all tracked files are touched).
+    #[structopt(name = "update")]
+    /// Update MD5s
+    Update {
+        /// Which file to update (if not set, all tracked files are update).
         filename: Option<String>,
     },
 
@@ -97,7 +98,7 @@ enum Commands {
 
 }
 
-pub fn print_errors(response: Result<(), String>) {
+pub fn print_errors(response: Result<()>) {
     match response {
         Ok(_) => {},
         Err(err) => eprintln!("Error: {}", err),
@@ -136,9 +137,9 @@ async fn main() {
                 print_errors(proj.stats());
             }
         }
-        Some(Commands::Touch { filename }) => {
+        Some(Commands::Update { filename }) => {
             if let Ok(mut proj) = Project::new() {
-                print_errors(proj.touch(filename.as_ref()));
+                print_errors(proj.update(filename.as_ref()));
             }
         }
         Some(Commands::Link { dir, service, key, name }) => {

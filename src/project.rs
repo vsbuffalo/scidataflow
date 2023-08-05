@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{File,metadata,canonicalize};
+use anyhow::{anyhow,Result};
 use std::{env, default};
 use std::path::{Path,PathBuf};
 use log::{info, trace, debug};
@@ -49,7 +50,7 @@ impl Project {
             .expect("SciFlow not initialized.")
     }
 
-    pub fn new() -> Result<Self, String> {
+    pub fn new() -> Result<Self> {
         let manifest = Project::get_manifest();
         let data = Project::load(&manifest)?;
         let proj = Project { manifest, data };
@@ -64,38 +65,38 @@ impl Project {
             .unwrap_or_else(|| panic!("invalid project location: is it in root?"))
     }
 
-    pub fn init() -> Result<(), String> {
+    pub fn init() -> Result<()> {
         // the new manifest should be in the present directory
         let manifest: PathBuf = PathBuf::from(MANIFEST);
         let found_manifest = find_config(None, MANIFEST);
         if manifest.exists() || found_manifest.is_none() {
-            return Err(String::from("Project already initialized. Manifest file already exists."));
+            return Err(anyhow!("Project already initialized. Manifest file already exists."));
         } else {
             let data = DataCollection::new();
             let proj = Project { manifest, data };
             // save to create the manifest
-            proj.save().map_err(|e| format!("Failed to save the project: {}", e))?;
+            proj.save()?;
         }
         Ok(())
     }
 
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<()> {
         // Serialize the data
         let serialized_data = serde_yaml::to_string(&self.data)
-            .map_err(|err| format!("Failed to serialize data manifest: {}", err))?;
+            .map_err(|err| anyhow::anyhow!("Failed to serialize data manifest: {}", err))?;
 
         // Create the file
         let mut file = File::create(&self.manifest)
-            .map_err(|err| format!("Failed to open file '{:?}': {}", self.manifest, err))?;
+            .map_err(|err| anyhow::anyhow!("Failed to open file '{:?}': {}", self.manifest, err))?;
 
         // Write the serialized data to the file
         write!(file, "{}", serialized_data)
-            .map_err(|err| format!("Failed to write data manifest: {}", err))?;
+            .map_err(|err| anyhow::anyhow!("Failed to write data manifest: {}", err))?;
 
         Ok(())
     }
 
-    fn load(manifest: &PathBuf) -> Result<DataCollection, String> {
+    fn load(manifest: &PathBuf) -> Result<DataCollection> {
         let contents = load_file(&manifest);
 
         if contents.trim().is_empty() {
@@ -103,8 +104,7 @@ impl Project {
             return Ok(DataCollection::new());
         }
 
-        let mut data = serde_yaml::from_str(&contents)
-            .map_err(|e| format!("{} is malformed!\nError: {:?}", MANIFEST, e))?;
+        let data = serde_yaml::from_str(&contents)?;
         Ok(data)
     }
 
@@ -130,30 +130,30 @@ impl Project {
         relative_path
     }
 
-    pub fn status(&self) -> Result<(), String> {
+    pub fn status(&self) -> Result<()> {
         let abbrev = Some(8);
         let mut rows: Vec<StatusEntry> = Vec::new();
         for value in self.data.files.values() {
-            let entry = value.status(&self.path_context(), abbrev);
+            let entry = value.status_info(&self.path_context(), abbrev)?;
             rows.push(entry);
         }
         print_status(rows, Some(&self.data.remotes));
         Ok(())
     }
 
-    pub fn stats(&self) -> Result<(), String> {
+    pub fn stats(&self) -> Result<()> {
         let mut rows: Vec<StatusEntry> = Vec::new();
         for key in self.data.files.keys() {
             let file_path = self.resolve_path(&key);
 
             // use metadata() method to get file metadata and extract size
             let metadata = metadata(&file_path)
-                .map_err(|err| format!("Failed to get metadata for file {:?}: {}", file_path, err))?;
+                .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", file_path, err))?;
 
             let size = format_bytes(metadata.len());
 
             let cols = vec![key.to_string_lossy().to_string(), size];
-            let entry = StatusEntry { code: StatusCode::Invalid, cols: cols };
+            let entry = StatusEntry { status: StatusCode::Invalid, cols: cols };
             rows.push(entry);
         }
         print_status(rows, None);
@@ -161,23 +161,24 @@ impl Project {
     }
 
 
-    pub fn add(&mut self, filepath: &String) -> Result<(), String> {
+    pub fn add(&mut self, filepath: &String) -> Result<()> {
         let filename = self.relative_path(Path::new(filepath));
 
-        self.data.register(DataFile::new(filename.clone(), self.path_context()));
+        let data_file = DataFile::new(filename.clone(), self.path_context())?;
+        self.data.register(data_file);
         self.save()?;
         Ok(())
     }
 
-    pub fn touch(&mut self, filepath: Option<&String>) -> Result<(), String> {
+    pub fn update(&mut self, filepath: Option<&String>) -> Result<()> {
         let path_context = self.path_context();
-        self.data.touch(filepath, path_context);
+        self.data.update(filepath, path_context);
         self.save()?;
         Ok(())
     }
 
     pub async fn link(&mut self, dir: &String, service: &String, 
-                      key: &String, name: &Option<String>) -> Result<(), String> {
+                      key: &String, name: &Option<String>) -> Result<()> {
         // (1) save the auth key to home dir
         let mut auth_keys = AuthKeys::new();
         auth_keys.add(service, key);
@@ -186,7 +187,7 @@ impl Project {
         let service = service.to_lowercase();
         let mut remote = match service.as_str() {
             "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
-            _ => Err(format!("Service '{}' is not supported!", service))
+            _ => Err(anyhow!("Service '{}' is not supported!", service))
         }?;
     
         // (3) authenticate remote
@@ -202,7 +203,7 @@ impl Project {
         Ok(())
     }
 
-    pub async fn ls(&mut self) -> Result<(), String> {
+    pub async fn ls(&mut self) -> Result<()> {
         for (key, remote) in &mut self.data.remotes {
             //let all_projects: ResponseResults = remote.get_projects().await;
             //match all_projects {
