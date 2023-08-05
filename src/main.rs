@@ -50,7 +50,7 @@ struct Cli {
 #[derive(Subcommand,StructOpt)]
 enum Commands {
      #[structopt(name = "add")]
-    /// Track a data file.
+    /// Add a data file to the manifest.
     Add {
         /// the file to begin tracking.
         filename: String,
@@ -90,11 +90,23 @@ enum Commands {
         /// project name for remote (default: directory name)
         name: Option<String>
     },
+
     #[structopt(name = "ls")]
     /// List remotes.
     Ls {
     },
 
+    #[structopt(name = "track")]
+    /// Keep track of this file on the remote.
+    Track {
+        /// the file to track with remote.
+        filename: String
+    },
+
+    #[structopt(name = "push")]
+    /// Push all tracked files to remote.
+    Push {
+    },
 
 }
 
@@ -107,61 +119,53 @@ pub fn print_errors(response: Result<()>) {
 
 #[tokio::main]
 async fn main() {
+    match run().await {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Error: {:?}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     env_logger::init();
-
-
     let cli = Cli::parse();
-
-
     match &cli.command {
         Some(Commands::Add { filename }) => {
-            if let Ok(mut proj) = Project::new() {
-                print_errors(proj.add(filename));
-            }
+            let mut proj = Project::new()?;
+            proj.add(filename)
         }
         Some(Commands::Init {  }) => {
-            print_errors(Project::init());
+            Project::init()
         }
         Some(Commands::Status {  }) => {
-            match Project::new() {
-                Ok(proj) => {
-                    print_errors(proj.status());
-                },
-                Err(err) => {
-                    println!("Error while creating new project: {}", err);
-                }
-            }
+            let proj = Project::new()?;
+            proj.status()
         }
         Some(Commands::Stats {  }) => {
-            if let Ok(proj) = Project::new() {
-                print_errors(proj.stats());
-            }
+            let proj = Project::new()?;
+            proj.stats()
         }
         Some(Commands::Update { filename }) => {
-            if let Ok(mut proj) = Project::new() {
-                print_errors(proj.update(filename.as_ref()));
-            }
+            let mut proj = Project::new()?;
+            proj.update(filename.as_ref())
         }
         Some(Commands::Link { dir, service, key, name }) => {
-            match Project::new() {
-                Ok(mut proj) => {
-                    print_errors(proj.link(dir, service, key, name).await);
-                },
-                Err(err) => {
-                    println!("Error while creating new project: {}", err);
-                }
-            }
+            let mut proj = Project::new()?;
+            proj.link(dir, service, key, name).await
         }
         Some(Commands::Ls {}) => {
-            match Project::new() {
-                Ok(mut proj) => {
-                    print_errors(proj.ls().await);
-                },
-                Err(err) => {
-                    println!("Error while creating new project: {}", err);
-                }
-            }
-
+            let mut proj = Project::new()?;
+            proj.ls().await
+        },
+        Some(Commands::Track { filename }) => {
+            let mut proj = Project::new()?;
+            proj.track(filename)
+        }
+        Some(Commands::Push {}) => {
+            let mut proj = Project::new()?;
+            proj.push()
         }
         None => {
             println!("{}\n", INFO);

@@ -166,15 +166,13 @@ impl Project {
 
         let data_file = DataFile::new(filename.clone(), self.path_context())?;
         self.data.register(data_file);
-        self.save()?;
-        Ok(())
+        self.save()
     }
 
     pub fn update(&mut self, filepath: Option<&String>) -> Result<()> {
         let path_context = self.path_context();
         self.data.update(filepath, path_context);
-        self.save()?;
-        Ok(())
+        self.save()
     }
 
     pub async fn link(&mut self, dir: &String, service: &String, 
@@ -199,8 +197,7 @@ impl Project {
 
         // (4) register the remote in the manifest
         self.data.register_remote(dir, remote)?;
-        self.save()?;
-        Ok(())
+        self.save()
     }
 
     pub async fn ls(&mut self) -> Result<()> {
@@ -219,6 +216,14 @@ impl Project {
             println!("files:\n{:?}", files);
         }
         Ok(())
+    }
+
+    pub fn track(&mut self, filepath: &String) -> Result<()> {
+        self.data.track_file(filepath);
+        self.save()
+    }
+
+    pub fn push(&mut self) {
     }
 
 }

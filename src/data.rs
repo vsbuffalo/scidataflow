@@ -41,7 +41,7 @@ impl DataFile {
         };
         Ok(DataFile {
             path: path,
-            tracked: true, 
+            tracked: false, 
             md5: md5,
         })
     }
@@ -84,6 +84,14 @@ impl DataFile {
             None => return Err(anyhow!("Cannot update MD5: file does not exist")),
         };
         self.md5 = new_md5;
+        Ok(())
+    }
+    /// Mark the file to track on the remote
+    pub fn set_tracked(&mut self) -> Result<()> {
+        if self.tracked {
+            return Err(anyhow!("file '{}' is already tracked on remote.", self.path.to_string_lossy()))
+        }
+        self.tracked = true;
         Ok(())
     }
 }
@@ -151,16 +159,17 @@ impl DataCollection {
         }
     }
 
-    pub fn register(&mut self, data_file: DataFile) {
+    pub fn register(&mut self, data_file: DataFile) -> Result<()> {
         self.files.insert(data_file.path.clone(), data_file);
+        Ok(())
     }
 
-    pub fn update(&mut self, filename: Option<&String>, path_context: PathBuf) {
+    pub fn update(&mut self, filename: Option<&String>, path_context: PathBuf) -> Result<()> {
         match filename {
             Some(path) => {
                 let path: PathBuf = path.into();
                 if let Some(data_file) = self.files.get_mut(&path) {
-                    data_file.update_md5(&path_context);
+                    data_file.update_md5(&path_context)?;
                     debug!("rehashed file {:?}", data_file.path);
                 }
             }
@@ -170,7 +179,7 @@ impl DataCollection {
                 for key in keys {
                     let path: PathBuf = key.into();
                     if let Some(data_file) = self.files.get_mut(&path) {
-                        data_file.update_md5(&path_context);
+                        data_file.update_md5(&path_context)?;
                         debug!("rehashed file {:?}", data_file.path);
                     }
 
@@ -178,6 +187,7 @@ impl DataCollection {
 
             }
         }
+        Ok(())
     }
 
     pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<()> {
@@ -193,14 +203,21 @@ impl DataCollection {
         Ok(())
     }
 
-    pub fn get_remote(&mut self, dir: &String) -> Result<&Remote, String> {
+    pub fn get_remote(&mut self, dir: &String) -> Result<&Remote> {
         let path = PathBuf::from(dir);
         match self.remotes.get(&path) {
             Some(remote) => Ok(remote),
-            None => Err("No such remote".to_string()),
+            None => Err(anyhow!("No such remote")),
         }
     }
-
+    pub fn track_file(&mut self, filepath: &String) -> Result<()> {
+        let filepath: PathBuf = filepath.into();
+        let data_file = self.files.get_mut(&filepath);
+        match data_file {
+            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath.to_string_lossy())),
+            Some(data_file) => data_file.set_tracked()
+        }
+    }
 }
 
 
