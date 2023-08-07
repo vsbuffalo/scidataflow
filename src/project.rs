@@ -115,7 +115,7 @@ impl Project {
         path
     }
 
-    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+    pub fn resolve_path(&self, path: &String) -> PathBuf {
         let full_path = self.path_context().join(path);
         let resolved_path = canonicalize(full_path).unwrap();
         debug!("resolved_path = {:?}", resolved_path);
@@ -128,6 +128,10 @@ impl Project {
         let relative_path = rel_dir.join(path);
         debug!("relative_path = {:?}", relative_path);
         relative_path
+    }
+
+    pub fn relative_path_string(&self, path: &Path) -> Result<String> {
+        Ok(self.relative_path(path).to_string_lossy().to_string())
     }
 
     pub fn status(&self) -> Result<()> {
@@ -143,16 +147,12 @@ impl Project {
 
     pub fn stats(&self) -> Result<()> {
         let mut rows: Vec<StatusEntry> = Vec::new();
-        for key in self.data.files.keys() {
+        for (key, data_file) in self.data.files.iter() {
             let file_path = self.resolve_path(&key);
 
-            // use metadata() method to get file metadata and extract size
-            let metadata = metadata(&file_path)
-                .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", file_path, err))?;
+            let size = format_bytes(data_file.get_size(&self.path_context())?);
 
-            let size = format_bytes(metadata.len());
-
-            let cols = vec![key.to_string_lossy().to_string(), size];
+            let cols = vec![key.clone(), size];
             let entry = StatusEntry { status: StatusCode::Invalid, cols: cols };
             rows.push(entry);
         }
@@ -162,9 +162,9 @@ impl Project {
 
 
     pub fn add(&mut self, filepath: &String) -> Result<()> {
-        let filename = self.relative_path(Path::new(filepath));
+        let filename = self.relative_path_string(Path::new(filepath))?;
 
-        let data_file = DataFile::new(filename.clone(), self.path_context())?;
+        let data_file = DataFile::new(filename, self.path_context())?;
         self.data.register(data_file);
         self.save()
     }
@@ -177,6 +177,8 @@ impl Project {
 
     pub async fn link(&mut self, dir: &String, service: &String, 
                       key: &String, name: &Option<String>) -> Result<()> {
+        // (0) get the relative directory path
+        let dir = self.relative_path_string(Path::new(dir));
         // (1) save the auth key to home dir
         let mut auth_keys = AuthKeys::new();
         auth_keys.add(service, key);
@@ -196,7 +198,7 @@ impl Project {
         let project_id = remote.set_project(name.as_ref().unwrap_or(&default_name)).await?;
 
         // (4) register the remote in the manifest
-        self.data.register_remote(dir, remote)?;
+        self.data.register_remote(&dir?, remote)?;
         self.save()
     }
 
@@ -211,19 +213,30 @@ impl Project {
             //    },
             //    Err(err) => eprintln!("Error while getting projects: {}", err),
             //}
-        authenticate_remote(remote)?;
+            authenticate_remote(remote)?;
             let files = remote.get_files().await?;
-            println!("files:\n{:?}", files);
+            println!("{} files:\n{:?}", key, files);
         }
         Ok(())
     }
 
-    pub fn track(&mut self, filepath: &String) -> Result<()> {
-        self.data.track_file(filepath);
+    pub fn untrack(&mut self, filepath: &String) -> Result<()> {
+        self.data.untrack_file(filepath)?;
         self.save()
     }
 
-    pub fn push(&mut self) {
+    pub fn track(&mut self, filepath: &String) -> Result<()> {
+        self.data.track_file(filepath)?;
+        self.save()
+    }
+
+    pub fn push(&mut self) -> Result<()> {
+        for (key, remote) in &mut self.data.remotes {
+            authenticate_remote(remote)?;
+            for file in &self.data.files {
+            }
+        }
+        Ok(())
     }
 
 }

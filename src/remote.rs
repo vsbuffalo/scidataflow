@@ -14,6 +14,7 @@ use reqwest::{Client, Response, Error };
 use reqwest::{StatusCode};
 use tokio;
 
+use crate::data::DataFile;
 use crate::project;
 use crate::tokio::io::ErrorKind;
 use super::data::DataCollection;
@@ -105,7 +106,7 @@ impl Remote {
         }
     }
 
-   pub async fn get_files(&mut self) -> Result<Vec<String>> {
+   pub async fn get_files(&mut self) -> Result<Vec<FigShareArticle>> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.get_files().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
@@ -127,6 +128,84 @@ pub struct FigShareAPI {
     token: String
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct FigShareUpload {
+    api_instance: FigShareAPI,
+}
+
+/// Manage a FigShare Upload
+impl FigShareUpload {
+    pub async fn get_article(&self, data_file: &DataFile) -> Result<Option<FigShareArticle>> {
+        let remote_files = self.api_instance.get_files().await?;
+        remote_files.into_iter()
+            .find(|article| &article.title == &data_file.path)
+            .map(|article| Ok(Some(article))).unwrap_or(Ok(None))
+    }
+
+    pub async fn create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
+        // (0) Get the project_id
+        let project_id = self.api_instance.project_id;
+        let url = match project_id {
+            Some(id) => Ok(format!("account/projects/{}/articles", id)), // wrap it in Ok
+            None => Err(anyhow!("Cannot create article in project; project ID is None"))
+        }?;
+
+        // (1) create the data for this article
+        let mut data: HashMap<String, String> = HashMap::new();
+        data.insert("title".to_string(), data_file.path.clone());
+        data.insert("defined_type".to_string(), "dataset".to_string());
+
+        // (2) issue request and parse out the article ID from location
+        let response = self.api_instance.issue_request(Method::POST, &url, Some(data)).await?;
+        let data = response.json::<Value>().await?;
+        let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
+            Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
+            None => Err(anyhow!("Response does not have 'location' set!"))
+        };
+        let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+
+        // (3) create and return the FigShareArticle
+        Ok(FigShareArticle { title: data_file.path.clone(), id: article_id, url: None })
+    }
+
+    pub async fn get_or_create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
+        let article = self.get_article(data_file).await?;
+        match article {
+            Some(article) => Ok(article),
+            None => self.create_article_in_project(data_file).await
+        }
+    }
+
+    async fn init_upload(&self, data_file: &DataFile, article: FigShareArticle) -> Result<()> {
+        // Once we have an article ID, we need to initialize the upload
+        let url = format!("account/articles/{}/files", article.id);
+        let mut data: HashMap<String, String> = HashMap::new();
+        data.insert("name".to_string(), article.title);
+        data.insert("md5".to_string(), data_file.md5.clone());
+        data.insert("size".to_string(), format!("{}", data_file.size));
+        let response = self.api_instance.issue_request(Method::POST, &url, Some(data)).await?;
+
+        let data = response.json::<Value>().await?;
+        let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
+            Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
+            None => Err(anyhow!("Response does not have 'location' set!"))
+        };
+        let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+
+        Ok(())
+    }
+
+    pub fn upload(&self, data_file: &DataFile) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FigShareArticle {
+    title: String,
+    id: i64,
+    url: Option<String>,
+}
 
 impl FigShareAPI {
     pub fn new() -> Self {
@@ -187,16 +266,11 @@ impl FigShareAPI {
     }
     fn ls(&self) {
     }
-    
+
     /// Get all projects on this remote
     pub async fn get_projects(&self) -> ResponseResults {
         let url = "/account/projects";
-        let response = match self.issue_request(Method::GET, &url, None).await {
-            Ok(response) => response,
-            Err(err) => {
-                return Err(anyhow!("Error while fetching project: {}", err));
-            }
-        };
+        let response = self.issue_request(Method::GET, &url, None).await?;
         debug!("reponse: {:?}", response);
         let data = response.json::<Vec<Value>>().await?;
         Ok(data)
@@ -242,12 +316,7 @@ impl FigShareAPI {
         ];
         let data: HashMap<_, _> = data.into_iter().collect();
 
-        let response = match self.issue_request(Method::POST, &url, Some(data)).await {
-            Ok(response) => response,
-            Err(err) => {
-                return Err(anyhow!("Error while creating project: {}", err));
-            }
-        };
+        let response = self.issue_request(Method::POST, &url, Some(data)).await?;
         debug!("response: {:?}", response);
         let data = response.json::<Value>().await?;
         info!("created remote project: {:?}", title);
@@ -277,21 +346,14 @@ impl FigShareAPI {
         Ok(project_id)
     }
 
-    pub async fn get_files(&self) -> Result<Vec<String>> {
+    pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
         let project_id = self.project_id; 
+        debug!("project_id={:?}", project_id);
         let url = format!("/account/projects/{}/articles", project_id.unwrap().to_string());
 
-        let response = match self.issue_request(Method::GET, &url, None).await {
-            Ok(response) => response,
-            Err(err) => {
-                return Err(anyhow!("Error while getting files: {}", err));
-            }
-        };
-        debug!("get_files() response: {:?}", response);
-        let data = response.json::<Value>()
-            .await?;
-        let res = Vec::new();
-        Ok(res)
+        let response = self.issue_request(Method::GET, &url, None).await?;
+        let files: Vec<FigShareArticle> = response.json().await?;
+        Ok(files)
     }
 
     pub async fn track(&self) -> Result<()> {

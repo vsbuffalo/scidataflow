@@ -1,5 +1,6 @@
 use std::path::{PathBuf};
 use anyhow::{anyhow,Result};
+use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
 use log::{info, trace, debug};
 use chrono::prelude::*;
@@ -25,36 +26,54 @@ pub struct StatusEntry {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataFile {
-    path: PathBuf,
-    tracked: bool,
-    md5: String,
+    pub path: String,
+    pub tracked: bool,
+    pub md5: String,
+    pub size: u64,
+    pub remote_id: Option<String>,
     //modified: Option<DateTime<Utc>>,
 }
 
 
 impl DataFile {
-    pub fn new(path: PathBuf, path_context: PathBuf) -> Result<DataFile> {
+    pub fn new(path: String, path_context: PathBuf) -> Result<DataFile> {
         let full_path = path_context.join(&path);
         let md5 = match compute_md5(&full_path)? {
             Some(md5) => md5,
             None => return Err(anyhow!("Could not compute MD5 as file does not exist")),
         };
+        let size = metadata(full_path)
+            .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", path, err))?
+            .len();
         Ok(DataFile {
             path: path,
             tracked: false, 
             md5: md5,
+            size: size,
+            remote_id: None,
         })
     }
 
-    pub fn get_md5(path: &PathBuf, path_context: &PathBuf) -> Result<Option<String>> {
-        compute_md5(path)
+    pub fn full_path(&self, path_context: &PathBuf) -> Result<PathBuf> {
+        Ok(path_context.join(self.path.clone()))
     }
 
-    pub fn get_mod_time(path: &PathBuf, path_context: &PathBuf) -> Result<DateTime<Utc>> {
-        let full_path = path_context.join(path.clone());
-        let metadata = fs::metadata(&full_path)?;
+    pub fn get_md5(&self, path_context: &PathBuf) -> Result<Option<String>> {
+        compute_md5(&self.full_path(path_context)?)
+    }
+
+    pub fn get_mod_time(&self, path_context: &PathBuf) -> Result<DateTime<Utc>> {
+        let metadata = fs::metadata(self.full_path(path_context)?)?;
         let mod_time = metadata.modified()?.into();
         Ok(mod_time)
+    }
+
+    pub fn get_size(&self, path_context: &PathBuf) -> Result<u64> {
+        // use metadata() method to get file metadata and extract size
+        let size = metadata(&self.full_path(path_context)?)
+            .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", self.path, err))?
+            .len();
+        Ok(size)
     }
 
     pub fn is_alive(&self, path_context: &PathBuf) -> bool {
@@ -62,7 +81,7 @@ impl DataFile {
     }
 
     pub fn is_changed(&self, path_context: &PathBuf) -> Result<bool> {
-        match DataFile::get_md5(&self.path, path_context)? {
+        match self.get_md5(path_context)? {
             Some(new_md5) => Ok(new_md5 != self.md5),
             None => Ok(true),
         }
@@ -79,7 +98,7 @@ impl DataFile {
         })
     }
     pub fn update_md5(&mut self, path_context: &PathBuf) -> Result<()> {
-        let new_md5 = match DataFile::get_md5(&self.path, &path_context)? {
+        let new_md5 = match self.get_md5(&path_context)? {
             Some(md5) => md5,
             None => return Err(anyhow!("Cannot update MD5: file does not exist")),
         };
@@ -89,9 +108,17 @@ impl DataFile {
     /// Mark the file to track on the remote
     pub fn set_tracked(&mut self) -> Result<()> {
         if self.tracked {
-            return Err(anyhow!("file '{}' is already tracked on remote.", self.path.to_string_lossy()))
+            return Err(anyhow!("file '{}' is already tracked on remote.", self.path))
         }
         self.tracked = true;
+        Ok(())
+    }
+    /// Mark the file to not track on the remote
+    pub fn set_untracked(&mut self) -> Result<()> {
+        if !self.tracked {
+            return Err(anyhow!("file '{}' is already not tracked on remote.", self.path))
+        }
+        self.tracked = false;
         Ok(())
     }
 }
@@ -104,16 +131,16 @@ fn shorten(hash: &String, abbrev: Option<i32>) -> String {
 impl Status for DataFile {
     fn status_info(&self, path_context: &PathBuf, n: Option<i32>) -> Result<StatusEntry> {
         //let is_updated = self.is_updated(path_context);
-        let new_md5 = DataFile::get_md5(&self.path, &path_context)?;
+        let new_md5 = self.get_md5(path_context)?;
         let old_md5 = &self.md5;
-        let mod_time = DataFile::get_mod_time(&self.path, &path_context)?;
+        let mod_time = self.get_mod_time(path_context)?;
         let status = self.status(path_context)?;
 
         let md5_string = match status {
             StatusCode::Current => format!("{}", shorten(&old_md5, n)),
             StatusCode::Changed => {
                 match new_md5 {
-                    Some(new_md5) => format!("{} > {}", shorten(&old_md5, n), shorten(&new_md5, n)),
+                    Some(new_md5) => format!("{}→{}", shorten(&old_md5, n), shorten(&new_md5, n)),
                     None => return Err(anyhow!("Error: new MD5 not available")),
                 }
             },
@@ -131,7 +158,7 @@ impl Status for DataFile {
         };
 
         let columns = vec![
-            self.path.to_string_lossy().to_string(),
+            self.path.clone(),
             status_msg.to_string(),
             md5_string,
             mod_time_pretty,
@@ -145,8 +172,8 @@ impl Status for DataFile {
 /// and how it talks to the outside world.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataCollection {
-    pub files: HashMap<PathBuf, DataFile>,
-    pub remotes: HashMap<PathBuf, Remote>,
+    pub files: HashMap<String, DataFile>,
+    pub remotes: HashMap<String, Remote>,
 }
 
 /// DataCollection methods: these should *only* be for 
@@ -166,19 +193,17 @@ impl DataCollection {
 
     pub fn update(&mut self, filename: Option<&String>, path_context: PathBuf) -> Result<()> {
         match filename {
-            Some(path) => {
-                let path: PathBuf = path.into();
-                if let Some(data_file) = self.files.get_mut(&path) {
+            Some(file) => {
+                if let Some(data_file) = self.files.get_mut(file) {
                     data_file.update_md5(&path_context)?;
                     debug!("rehashed file {:?}", data_file.path);
                 }
             }
             None => {
                 // 
-                let keys: Vec<_> = self.files.keys().cloned().collect();
-                for key in keys {
-                    let path: PathBuf = key.into();
-                    if let Some(data_file) = self.files.get_mut(&path) {
+                let all_files: Vec<_> = self.files.keys().cloned().collect();
+                for file in all_files {
+                    if let Some(data_file) = self.files.get_mut(&file) {
                         data_file.update_md5(&path_context)?;
                         debug!("rehashed file {:?}", data_file.path);
                     }
@@ -191,33 +216,38 @@ impl DataCollection {
     }
 
     pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<()> {
-        let path = PathBuf::from(dir);
-        if self.remotes.contains_key(&path) {
+        if self.remotes.contains_key(dir) {
             let msg = anyhow!("Directory '{}' is already tracked in the \
                               data manifest. You can manually delete it \
                               and re-add.", dir);
             return Err(msg);
         } else {
-            self.remotes.insert(path, remote);
+            self.remotes.insert(dir.to_string(), remote);
         }
         Ok(())
     }
 
     pub fn get_remote(&mut self, dir: &String) -> Result<&Remote> {
-        let path = PathBuf::from(dir);
-        match self.remotes.get(&path) {
+        match self.remotes.get(dir) {
             Some(remote) => Ok(remote),
             None => Err(anyhow!("No such remote")),
         }
     }
     pub fn track_file(&mut self, filepath: &String) -> Result<()> {
-        let filepath: PathBuf = filepath.into();
-        let data_file = self.files.get_mut(&filepath);
+        let data_file = self.files.get_mut(filepath);
         match data_file {
-            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath.to_string_lossy())),
+            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath)),
             Some(data_file) => data_file.set_tracked()
         }
     }
+    pub fn untrack_file(&mut self, filepath: &String) -> Result<()> {
+        let data_file = self.files.get_mut(filepath);
+        match data_file {
+            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath)),
+            Some(data_file) => data_file.set_untracked()
+        }
+    }
+
 }
 
 

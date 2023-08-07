@@ -96,6 +96,13 @@ enum Commands {
     Ls {
     },
 
+    #[structopt(name = "untrack")]
+    /// No longer keep track of this file on the remote.
+    Untrack {
+        /// the file to untrack with remote.
+        filename: String
+    },
+
     #[structopt(name = "track")]
     /// Keep track of this file on the remote.
     Track {
@@ -162,6 +169,10 @@ async fn run() -> Result<()> {
         Some(Commands::Track { filename }) => {
             let mut proj = Project::new()?;
             proj.track(filename)
+        }
+        Some(Commands::Untrack { filename }) => {
+            let mut proj = Project::new()?;
+            proj.untrack(filename)
         }
         Some(Commands::Push {}) => {
             let mut proj = Project::new()?;

@@ -113,7 +113,7 @@ fn organize_by_dir(rows: Vec<StatusEntry>) -> HashMap<String, Vec<StatusEntry>> 
     dir_map
 }
 
-pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<PathBuf,Remote>>) {
+pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<String,Remote>>) {
     println!("{}", "Project data status:".bold());
     println!("{} data file{} tracked.\n", rows.len(), if rows.len() > 1 {"s"} else {""});
 
@@ -123,7 +123,7 @@ pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<PathBuf,Remo
         Some(remote_map) => {
             let mut new_map = HashMap::new();
             for (key, value) in organized_rows {
-                if let Some(remote) = remote_map.get(&PathBuf::from(&key)) {
+                if let Some(remote) = remote_map.get(&key) {
                     let new_key = format!("{} > {}", key, remote.name());
                     new_map.insert(new_key, value);
                 } else {
@@ -173,5 +173,5 @@ pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     let formatter = Formatter::new();
     let local_time = mod_time.with_timezone(&Local);
     let timestamp = local_time.format("%Y-%m-%d %l:%M%p").to_string();
-    format!("{} ({})", formatter.convert(std_duration), timestamp)
+    format!("{} ({})", timestamp, formatter.convert(std_duration))
 }
