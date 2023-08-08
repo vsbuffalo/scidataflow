@@ -176,7 +176,7 @@ async fn run() -> Result<()> {
         }
         Some(Commands::Push {}) => {
             let mut proj = Project::new()?;
-            proj.push()
+            proj.push().await
         }
         None => {
             println!("{}\n", INFO);

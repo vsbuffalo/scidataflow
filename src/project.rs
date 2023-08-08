@@ -230,10 +230,17 @@ impl Project {
         self.save()
     }
 
-    pub fn push(&mut self) -> Result<()> {
+    pub async fn push(&mut self) -> Result<()> {
+        // TODO before any push, we need to make sure that the project
+        // status is "clean" e.g. nothing out of data.
         for (key, remote) in &mut self.data.remotes {
             authenticate_remote(remote)?;
-            for file in &self.data.files {
+        }
+        
+        for (key, remote) in &self.data.remotes {
+            for (path, data_file) in &self.data.files {
+                info!("uploading file {:?} to {:}", path, remote.name());
+                remote.upload(&data_file).await?;
             }
         }
         Ok(())

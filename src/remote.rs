@@ -1,4 +1,5 @@
 use serde_yaml;
+use serde;
 use std::{fs, hash::Hash};
 use std::fs::File;
 use std::io::Read;
@@ -117,6 +118,13 @@ impl Remote {
        Ok(())
    }
 
+   pub async fn upload(&self, data_file: &DataFile) -> Result<()> {
+       match self {
+           Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file).await,
+           Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+       }
+   }
+
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -128,13 +136,33 @@ pub struct FigShareAPI {
     token: String
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct FigShareUpload {
-    api_instance: FigShareAPI,
+pub struct FigShareUpload<'a> {
+    api_instance: &'a FigShareAPI,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FigShareUploadInfo {
+    upload_token: String,
+    upload_url: String,
+    status: String,
+    preview_state: String,
+    viewer_type: String,
+    is_attached_to_public_version: bool,
+    id: i64,
+    name: String,
+    size: i64,
+    is_link_only: bool,
+    download_url: String,
+    supplied_md5: String,
+    computed_md5: String,
 }
 
 /// Manage a FigShare Upload
-impl FigShareUpload {
+impl<'a> FigShareUpload<'a> {
+    pub fn new(api: &'a FigShareAPI) -> Self {
+        FigShareUpload { api_instance: api }
+    }
+
     pub async fn get_article(&self, data_file: &DataFile) -> Result<Option<FigShareArticle>> {
         let remote_files = self.api_instance.get_files().await?;
         remote_files.into_iter()
@@ -146,7 +174,7 @@ impl FigShareUpload {
         // (0) Get the project_id
         let project_id = self.api_instance.project_id;
         let url = match project_id {
-            Some(id) => Ok(format!("account/projects/{}/articles", id)), // wrap it in Ok
+            Some(id) => Ok(format!("account/projects/{}/articles", id)),
             None => Err(anyhow!("Cannot create article in project; project ID is None"))
         }?;
 
@@ -154,6 +182,7 @@ impl FigShareUpload {
         let mut data: HashMap<String, String> = HashMap::new();
         data.insert("title".to_string(), data_file.path.clone());
         data.insert("defined_type".to_string(), "dataset".to_string());
+        debug!("creating data for article: {:?}", data);
 
         // (2) issue request and parse out the article ID from location
         let response = self.api_instance.issue_request(Method::POST, &url, Some(data)).await?;
@@ -163,9 +192,17 @@ impl FigShareUpload {
             None => Err(anyhow!("Response does not have 'location' set!"))
         };
         let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+        debug!("got article ID: {:?}", article_id);
 
         // (3) create and return the FigShareArticle
-        Ok(FigShareArticle { title: data_file.path.clone(), id: article_id, url: None })
+        Ok(FigShareArticle {
+            title: data_file.path.clone(),
+            name: Some(data_file.path.clone()),
+            id: article_id,
+            url: None,
+            md5: None,
+            size: None
+        })
     }
 
     pub async fn get_or_create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
@@ -176,26 +213,42 @@ impl FigShareUpload {
         }
     }
 
-    async fn init_upload(&self, data_file: &DataFile, article: FigShareArticle) -> Result<()> {
-        // Once we have an article ID, we need to initialize the upload
+    async fn init_upload(&self, data_file: &DataFile, article: FigShareArticle) -> Result<FigShareUploadInfo> {
+        debug!("initializing upload of '{:?}'", data_file);
+        // Requires: article ID, in FigShareArticle struct
+        // (0) create URL and data
         let url = format!("account/articles/{}/files", article.id);
-        let mut data: HashMap<String, String> = HashMap::new();
-        data.insert("name".to_string(), article.title);
-        data.insert("md5".to_string(), data_file.md5.clone());
-        data.insert("size".to_string(), format!("{}", data_file.size));
+        let data = FigShareArticle {
+            title: article.title.clone(),
+            name: Some(article.title),
+            id: article.id,
+            url: None,
+            md5: Some(data_file.md5.clone()),
+            size: Some(data_file.size)
+        };
+        // (1) issue POST 
         let response = self.api_instance.issue_request(Method::POST, &url, Some(data)).await?;
+        debug!("upload post response: {:?}", response);
 
+
+        // (2) get location
         let data = response.json::<Value>().await?;
-        let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
-            Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
+        let location = match data.get("location").and_then(|loc| loc.as_str()) {
+            Some(loc) => Ok(loc),
             None => Err(anyhow!("Response does not have 'location' set!"))
         };
-        let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
-
-        Ok(())
+        //let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+        let response = self.api_instance
+            .issue_request::<HashMap<String, String>>(Method::GET, location?, None)
+            .await?;
+        let upload_info: FigShareUploadInfo = response.json().await?;
+        Ok(upload_info)
     }
 
-    pub fn upload(&self, data_file: &DataFile) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile) -> Result<()> {
+        let article = self.get_or_create_article_in_project(data_file).await?;
+        debug!("upload() article: {:?}", article);
+        self.init_upload(data_file, article).await?;
         Ok(())
     }
 }
@@ -203,8 +256,11 @@ impl FigShareUpload {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FigShareArticle {
     title: String,
+    name: Option<String>,
     id: i64,
     url: Option<String>,
+    md5: Option<String>,
+    size: Option<u64>
 }
 
 impl FigShareAPI {
@@ -226,7 +282,8 @@ impl FigShareAPI {
         self.project_id = Some(project_id);
     }
 
-    async fn issue_request(&self, method: Method, url: &str, data: Option<HashMap<String, String>>) 
+    async fn issue_request<T: serde::Serialize>(&self, method: Method, url: &str, 
+                           data: Option<T>) 
         -> Result<Response> {
             let mut headers = HeaderMap::new();
             let url = url.trim_start_matches('/');
@@ -236,7 +293,6 @@ impl FigShareAPI {
 
             headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
             debug!("headers: {:?}", headers);
-            debug!("data: {:?}", data);
 
             let client = Client::new();
             let response = match data {
@@ -256,11 +312,14 @@ impl FigShareAPI {
             if response_status.is_success() {
                 Ok(response)
             } else {
-                Err(anyhow!("HTTP Error: {}", response_status))
+                Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, full_url, response.text().await?))
             }
         }
 
-    fn upload(&self) {
+    pub async fn upload(&self, data_file: &DataFile) -> Result<()> {
+        let this_upload = FigShareUpload::new(self);
+        this_upload.upload(data_file).await?;
+        Ok(())
     }
     fn download(&self) {
     }
@@ -270,7 +329,7 @@ impl FigShareAPI {
     /// Get all projects on this remote
     pub async fn get_projects(&self) -> ResponseResults {
         let url = "/account/projects";
-        let response = self.issue_request(Method::GET, &url, None).await?;
+        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
         debug!("reponse: {:?}", response);
         let data = response.json::<Vec<Value>>().await?;
         Ok(data)
@@ -348,10 +407,10 @@ impl FigShareAPI {
 
     pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
         let project_id = self.project_id; 
-        debug!("project_id={:?}", project_id);
+        debug!("get_files(): project_id={:?}", project_id);
         let url = format!("/account/projects/{}/articles", project_id.unwrap().to_string());
 
-        let response = self.issue_request(Method::GET, &url, None).await?;
+        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
         let files: Vec<FigShareArticle> = response.json().await?;
         Ok(files)
     }
@@ -359,6 +418,7 @@ impl FigShareAPI {
     pub async fn track(&self) -> Result<()> {
         Ok(())
     }
+
 
 }
 
