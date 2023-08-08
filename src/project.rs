@@ -231,6 +231,7 @@ impl Project {
     }
 
     pub async fn push(&mut self) -> Result<()> {
+        let path_context = self.path_context();
         // TODO before any push, we need to make sure that the project
         // status is "clean" e.g. nothing out of data.
         for (key, remote) in &mut self.data.remotes {
@@ -240,7 +241,7 @@ impl Project {
         for (key, remote) in &self.data.remotes {
             for (path, data_file) in &self.data.files {
                 info!("uploading file {:?} to {:}", path, remote.name());
-                remote.upload(&data_file).await?;
+                remote.upload(&data_file, &path_context).await?;
             }
         }
         Ok(())

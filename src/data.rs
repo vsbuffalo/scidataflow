@@ -1,4 +1,4 @@
-use std::path::{PathBuf};
+use std::path::{PathBuf,Path};
 use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
@@ -56,6 +56,14 @@ impl DataFile {
 
     pub fn full_path(&self, path_context: &PathBuf) -> Result<PathBuf> {
         Ok(path_context.join(self.path.clone()))
+    }
+
+    pub fn basename(&self) -> Result<String> {
+        let path = Path::new(&self.path);
+        match path.file_stem() {
+            Some(basename) => Ok(basename.to_string_lossy().to_string()),
+            None => Err(anyhow!("could not get basename of '{}'", self.path))
+        }
     }
 
     pub fn get_md5(&self, path_context: &PathBuf) -> Result<Option<String>> {

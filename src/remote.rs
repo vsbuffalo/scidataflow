@@ -1,9 +1,10 @@
 use serde_yaml;
 use serde;
+use url::Url;
 use std::{fs, hash::Hash};
 use std::fs::File;
-use std::io::Read;
-use std::path::Path;
+use std::path::{Path,PathBuf};
+use std::io::{Read,Seek,SeekFrom};
 use std::env;
 use anyhow::{anyhow,Result};
 use log::{info, trace, debug};
@@ -180,7 +181,7 @@ impl<'a> FigShareUpload<'a> {
 
         // (1) create the data for this article
         let mut data: HashMap<String, String> = HashMap::new();
-        data.insert("title".to_string(), data_file.path.clone());
+        data.insert("title".to_string(), data_file.basename()?);
         data.insert("defined_type".to_string(), "dataset".to_string());
         debug!("creating data for article: {:?}", data);
 
@@ -226,29 +227,42 @@ impl<'a> FigShareUpload<'a> {
             md5: Some(data_file.md5.clone()),
             size: Some(data_file.size)
         };
-        // (1) issue POST 
+        // (1) issue POST to get location
         let response = self.api_instance.issue_request(Method::POST, &url, Some(data)).await?;
         debug!("upload post response: {:?}", response);
 
 
         // (2) get location
         let data = response.json::<Value>().await?;
-        let location = match data.get("location").and_then(|loc| loc.as_str()) {
+        let location_url = match data.get("location").and_then(|loc| loc.as_str()) {
             Some(loc) => Ok(loc),
             None => Err(anyhow!("Response does not have 'location' set!"))
-        };
-        //let article_id: i64 = article_id_result?.parse::<i64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+        }?;
+        // we need to extract out the non-domain part
+        let parsed_url = Url::parse(location_url)?;
+        let location = parsed_url.path()
+            .to_string()
+            .replacen("/v2/", "/", 1);
+        debug!("upload location: {:?}", location);
+
+        // (3) issue GET to retrieve upload info
         let response = self.api_instance
-            .issue_request::<HashMap<String, String>>(Method::GET, location?, None)
+            .issue_request::<HashMap<String, String>>(Method::GET, &location, None)
             .await?;
         let upload_info: FigShareUploadInfo = response.json().await?;
         Ok(upload_info)
     }
 
-    pub async fn upload(&self, data_file: &DataFile) -> Result<()> {
+    async fn upload_parts(&self, data_file: &DataFile, 
+                          upload_info: &FigShareUploadInfo,
+                          path_context: &PathBuf) {
+        // TODO
+    }
+
+    pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
         let article = self.get_or_create_article_in_project(data_file).await?;
         debug!("upload() article: {:?}", article);
-        self.init_upload(data_file, article).await?;
+        let upload_info = self.init_upload(data_file, article).await?;
         Ok(())
     }
 }
