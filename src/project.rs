@@ -1,19 +1,19 @@
-use std::collections::HashMap;
 use std::fs::{File,metadata,canonicalize};
 use anyhow::{anyhow,Result};
-use std::{env, default};
+use std::{env};
 use std::path::{Path,PathBuf};
+#[allow(unused_imports)]
 use log::{info, trace, debug};
-use reqwest::Response;
 use std::io::{Write};
 
-use super::remote::{Remote,FigShareAPI};
-use super::data::{DataFile,DataCollection};
-use super::utils::{load_file,print_status};
-use super::remote::{AuthKeys,authenticate_remote,ResponseResult,ResponseResults};
+use crate::data::{DataFile,DataCollection};
+use crate::utils::{load_file,ensure_directory,print_status};
+use crate::remote::{AuthKeys,authenticate_remote};
+use crate::remote::Remote;
+use crate::figshare::FigShareAPI;
 use crate::data::{StatusEntry,StatusCode};
 use crate::traits::Status;
-use crate::utils::{format_bytes, print_fixed_width};
+use crate::utils::{format_bytes};
 
 const MANIFEST: &str = "data_manifest.yml";
 
@@ -122,16 +122,20 @@ impl Project {
         resolved_path
     }
 
-    pub fn relative_path(&self, path: &Path) -> PathBuf {
-        let cwd = env::current_dir().expect("Failed to get current directory");
-        let rel_dir = cwd.strip_prefix(self.path_context()).unwrap().to_path_buf();
-        let relative_path = rel_dir.join(path);
-        debug!("relative_path = {:?}", relative_path);
-        relative_path
+    pub fn relative_path(&self, path: &Path) -> Result<PathBuf> {
+        let absolute_path = canonicalize(path)?;
+        ensure_directory(&absolute_path)?;
+        let path_context = canonicalize(self.path_context())?;
+
+        // Compute relative path directly using strip_prefix
+        match absolute_path.strip_prefix(&path_context) {
+            Ok(rel_path) => Ok(rel_path.to_path_buf()),
+            Err(_) => Err(anyhow::anyhow!("Failed to compute relative path")),
+        }
     }
 
     pub fn relative_path_string(&self, path: &Path) -> Result<String> {
-        Ok(self.relative_path(path).to_string_lossy().to_string())
+        Ok(self.relative_path(path)?.to_string_lossy().to_string())
     }
 
     pub fn status(&self) -> Result<()> {
@@ -145,15 +149,22 @@ impl Project {
         Ok(())
     }
 
+    pub fn is_clean(&self) -> Result<bool> {
+        for data_file in self.data.files.values() {
+            let status = data_file.status(&self.path_context())?;
+            if status != StatusCode::Current {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub fn stats(&self) -> Result<()> {
         let mut rows: Vec<StatusEntry> = Vec::new();
         for (key, data_file) in self.data.files.iter() {
-            let file_path = self.resolve_path(&key);
-
             let size = format_bytes(data_file.get_size(&self.path_context())?);
-
             let cols = vec![key.clone(), size];
-            let entry = StatusEntry { status: StatusCode::Invalid, cols: cols };
+            let entry = StatusEntry { status: StatusCode::Invalid, cols };
             rows.push(entry);
         }
         print_status(rows, None);
@@ -165,40 +176,46 @@ impl Project {
         let filename = self.relative_path_string(Path::new(filepath))?;
 
         let data_file = DataFile::new(filename, self.path_context())?;
-        self.data.register(data_file);
+        self.data.register(data_file)?;
         self.save()
     }
 
     pub fn update(&mut self, filepath: Option<&String>) -> Result<()> {
         let path_context = self.path_context();
-        self.data.update(filepath, path_context);
+        self.data.update(filepath, path_context)?;
         self.save()
     }
 
     pub async fn link(&mut self, dir: &String, service: &String, 
                       key: &String, name: &Option<String>) -> Result<()> {
         // (0) get the relative directory path
-        let dir = self.relative_path_string(Path::new(dir));
+        let dir = self.relative_path_string(Path::new(dir))?;
+
         // (1) save the auth key to home dir
         let mut auth_keys = AuthKeys::new();
         auth_keys.add(service, key);
 
-        // (2) create a new remote 
+        // (2) create a new remote, with a name
+        // Associate a project (either by creating it, or finding it on FigShare)
+        let name = match name {
+            None => self.name(),
+            Some(n) => n.to_string()
+        };
+
         let service = service.to_lowercase();
         let mut remote = match service.as_str() {
-            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new())),
+            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new(name)?)),
             _ => Err(anyhow!("Service '{}' is not supported!", service))
         }?;
-    
+
         // (3) authenticate remote
         authenticate_remote(&mut remote)?;
-        // (4) associate a project (either by creating it, or finding it on
-        // FigShare)
-        let default_name = self.name();
-        let project_id = remote.set_project(name.as_ref().unwrap_or(&default_name)).await?;
+
+        // (4) get the project ID
+        remote.set_project().await?;
 
         // (4) register the remote in the manifest
-        self.data.register_remote(&dir?, remote)?;
+        self.data.register_remote(&dir, remote)?;
         self.save()
     }
 
@@ -221,12 +238,14 @@ impl Project {
     }
 
     pub fn untrack(&mut self, filepath: &String) -> Result<()> {
-        self.data.untrack_file(filepath)?;
+        let filepath = self.relative_path_string(Path::new(filepath))?;
+        self.data.untrack_file(&filepath)?;
         self.save()
     }
 
     pub fn track(&mut self, filepath: &String) -> Result<()> {
-        self.data.track_file(filepath)?;
+        let filepath = self.relative_path_string(Path::new(filepath))?;
+        self.data.track_file(&filepath)?;
         self.save()
     }
 
@@ -234,18 +253,44 @@ impl Project {
         let path_context = self.path_context();
         // TODO before any push, we need to make sure that the project
         // status is "clean" e.g. nothing out of data.
-        for (key, remote) in &mut self.data.remotes {
+        for remote in self.data.remotes.values_mut() {
             authenticate_remote(remote)?;
         }
-        
-        for (key, remote) in &self.data.remotes {
-            for (path, data_file) in &self.data.files {
-                info!("uploading file {:?} to {:}", path, remote.name());
-                remote.upload(&data_file, &path_context).await?;
+
+        let data_dirs = self.data.get_files_by_directory()?;
+
+        for (dir, remote) in &self.data.remotes {
+            let existing_files = remote.get_files().await?;
+            for data_files in data_dirs.get(dir) {
+                for data_file in data_files {
+                    if !data_file.tracked {
+                        continue;
+                    }
+                    let do_upload: bool = match existing_files.get(&data_file.path) {
+                        None => {
+                            // remote does not exist, upload.
+                            true
+                        },
+                        Some(existing_remote) => {
+                            let existing_md5 = match existing_remote.get_md5() {
+                                None => Err("The "),
+                                Some(md5) => {
+                                }
+                            }
+                            if == data_file.md5 {
+                                info!("file '{}' is not being uploaded because it exists \
+                                      on the remote and the MD5s match.", data_file.path);
+                                false
+                            }
+                        }
+                    }
+
+                    info!("uploading file {:?} to {:}", data_file.path, remote.name());
+                    remote.upload(&data_file, &path_context).await?;
+                }
             }
         }
         Ok(())
     }
-
 }
 

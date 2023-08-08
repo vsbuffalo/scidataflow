@@ -2,6 +2,9 @@ use std::path::{PathBuf,Path};
 use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
+use serde::ser::SerializeMap;
+use serde;
+#[allow(unused_imports)]
 use log::{info, trace, debug};
 use chrono::prelude::*;
 use std::collections::HashMap;
@@ -10,8 +13,9 @@ use std::fs;
 use crate::traits::Status;
 
 use super::utils::{format_mod_time,compute_md5};
-use super::remote::{Remote,FigShareAPI};
+use super::remote::{Remote};
 
+#[derive( PartialEq)]
 pub enum StatusCode {
    Current,
    Changed,
@@ -60,7 +64,7 @@ impl DataFile {
 
     pub fn basename(&self) -> Result<String> {
         let path = Path::new(&self.path);
-        match path.file_stem() {
+        match path.file_name() {
             Some(basename) => Ok(basename.to_string_lossy().to_string()),
             None => Err(anyhow!("could not get basename of '{}'", self.path))
         }
@@ -176,11 +180,29 @@ impl Status for DataFile {
     }
 }
 
+fn ordered_map<K, V, S>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    K: serde::Serialize + Ord,
+    V: serde::Serialize,
+    S: serde::ser::Serializer,
+{
+    let mut ordered: Vec<_> = value.iter().collect();
+    ordered.sort_by_key(|a| a.0);
+
+    let mut map = serializer.serialize_map(Some(ordered.len()))?;
+    for (k, v) in ordered {
+        map.serialize_entry(k, v)?;
+    }
+    map.end()
+}
+
 /// DataCollection structure for managing the data manifest 
 /// and how it talks to the outside world.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataCollection {
+    #[serde(serialize_with = "ordered_map")]
     pub files: HashMap<String, DataFile>,
+    #[serde(serialize_with = "ordered_map")]
     pub remotes: HashMap<String, Remote>,
 }
 
@@ -242,20 +264,34 @@ impl DataCollection {
         }
     }
     pub fn track_file(&mut self, filepath: &String) -> Result<()> {
+        debug!("complete files: {:?}", self.files);
         let data_file = self.files.get_mut(filepath);
         match data_file {
-            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath)),
+            None => Err(anyhow!("Data file '{}' is not in the data manifest. Add it first using:\n \
+                                $ sdf track {}\n", filepath, filepath)),
             Some(data_file) => data_file.set_tracked()
         }
     }
     pub fn untrack_file(&mut self, filepath: &String) -> Result<()> {
         let data_file = self.files.get_mut(filepath);
         match data_file {
-            None => Err(anyhow!("Cannot get file '{}' from the data manifest.", filepath)),
+            None => Err(anyhow!("Cannot untrack data file '{}' since it was never added to\
+                                the data manifest.", filepath)),
             Some(data_file) => data_file.set_untracked()
         }
     }
 
+    pub fn get_files_by_directory(&self) -> Result<HashMap<String,Vec<&DataFile>>> {
+        let mut dir_map: HashMap<String, Vec<&DataFile>> = HashMap::new();
+        for (path, data_file) in self.files.iter() {
+            let path = Path::new(&path);
+            if let Some(parent_path) = path.parent() {
+                let parent_dir = parent_path.to_string_lossy().into_owned();
+                dir_map.entry(parent_dir).or_default().push(data_file);
+            }
+        }
+        Ok(dir_map)
+    }
 }
 
 

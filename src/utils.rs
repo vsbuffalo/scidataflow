@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use anyhow::{anyhow,Result};
-use chrono::{Duration, Utc,Local};
+use chrono::{Utc,Local};
 use timeago::Formatter;
 use std::path::{Path,PathBuf};
 use std::fs::{File};
 use std::io::Read;
 use md5::{Context};
+#[allow(unused_imports)]
 use log::{info, trace, debug};
 use colored::*;
 use unicode_width::UnicodeWidthStr;
@@ -13,14 +14,20 @@ use unicode_width::UnicodeWidthStr;
 use crate::data::{StatusEntry, StatusCode};
 use super::remote::{Remote};
 
-const BUFFER_SIZE: usize = 4096;
-
-
 pub fn load_file(path: &PathBuf) -> String {
     let mut file = File::open(&path).expect("unable to open file");
     let mut contents = String::new();
     file.read_to_string(&mut contents).expect("unable to read file");
     contents
+}
+
+pub fn ensure_directory(dir: &Path) -> Result<()> {
+    let path = Path::new(dir);
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(anyhow!("'{}' is not a directory or doesn't exist.", dir.to_string_lossy()))
+    }
 }
 
 /// Compute the MD5 of a file returning None if the file is empty.
@@ -39,7 +46,7 @@ pub fn compute_md5(file_path: &Path) -> Result<Option<String>> {
         let bytes_read = match file.read(&mut buffer) {
             Ok(0) => break, // EOF
             Ok(bytes_read) => bytes_read,
-            Err(e) => return Err(anyhow!("I/O reading file!".to_string())),
+            Err(e) => return Err(anyhow!("I/O reading file: {:?}", e)),
         };
 
         md5.consume(&buffer[..bytes_read]);

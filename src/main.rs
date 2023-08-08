@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
-use reqwest::dns::Resolve;
 use anyhow::Result;
 use crate::project::Project;
 use structopt::StructOpt;
+#[allow(unused_imports)]
 use log::{info, trace, debug};
 use tokio;
 
@@ -11,6 +11,8 @@ pub mod project;
 pub mod data;
 pub mod traits;
 pub mod remote;
+pub mod figshare;
+pub mod dryad;
 
 const INFO: &str = "\
 SciFlow: Manage and Share Scientific Data
@@ -88,6 +90,7 @@ enum Commands {
         /// the authentication token.
         key: String,
         /// project name for remote (default: directory name)
+        #[structopt(long)]
         name: Option<String>
     },
 
