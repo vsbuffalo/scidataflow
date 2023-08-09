@@ -127,8 +127,14 @@ impl DataFile {
         }) 
     }
     // Do a merge on paths, and fold in remote status.
-    // Merge is all-way.
-    pub fn status_with_remotes(&self, path_context: &PathBuf, remotes: HashMap<String,Remote>) -> Result<StatusEntry> {
+    // Merge is left join, where there will be some files on remote 
+    // that are not DataFiles -- DataFiles must represent a fixed file 
+    // that is *tracked* in the manifest. 
+    //
+    // Note: In the proper project set up, each file belongs to one directory
+    // and *if* this directory is tracked on the remote, it should be
+    // associated with *one* remote service only.
+    pub fn status_with_remotes(&self, path_context: &PathBuf, remote: Remote) -> Result<StatusEntry> {
         let mut status_entry = self.status(&path_context)?;
         // TODO add in the remote info
         Ok(status_entry)
@@ -180,7 +186,7 @@ impl Status for DataFile {
             LocalStatusCode::Current => format!("{}", shorten(&old_md5, n)),
             LocalStatusCode::Changed => {
                 match new_md5 {
-                    Some(new_md5) => format!("{}→{}", shorten(&old_md5, n), shorten(&new_md5, n)),
+                    Some(new_md5) => format!("{} → {}", shorten(&old_md5, n), shorten(&new_md5, n)),
                     None => return Err(anyhow!("Error: new MD5 not available")),
                 }
             },

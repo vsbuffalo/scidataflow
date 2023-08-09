@@ -177,15 +177,15 @@ impl Project {
 
 
     pub fn add(&mut self, files: &Vec<String>) -> Result<()> {
-        let mut added_files = 0;
+        let mut num_added = 0;
         for filepath in files {
             let filename = self.relative_path_string(Path::new(&filepath.clone()))?;
             let data_file = DataFile::new(filename.clone(), self.path_context())?;
             info!("Adding file '{}'.", filename);
             self.data.register(data_file)?;
-            added_files += 1;
+            num_added += 1;
         }
-        println!("Added {} files.", added_files);
+        println!("Added {} files.", num_added);
         self.save()
     }
 
@@ -273,16 +273,21 @@ impl Project {
 
         for (dir, remote) in self.data.remotes.iter() {
             let existing_files = remote.get_files_hashmap().await?;
+            info!("existing files: {:?}", existing_files);
             for data_files in data_dirs.get(dir) {
                 for data_file in data_files {
                     if !data_file.tracked {
-                        debug!("file {} not tracked, skipping", data_file.path);
+                        info!("file {} not tracked, skipping", data_file.path);
                         continue;
                     }
 
                     // should we do the upload? 
-                    let do_upload: bool = match existing_files.get(&data_file.path) {
-                        None => true, // file does not exist on remote, upload.
+                    let file_name = data_file.basename()?.clone();
+                    let do_upload: bool = match existing_files.get(&file_name) {
+                        None => {
+                            info!("file '{}' not found on remote {}", data_file.path, remote.name());
+                            true
+                        }, // file does not exist on remote, upload.
                         Some(existing_remote) => {
                             match existing_remote.get_md5() {
                                 // edge case: the MD5 is not yet in the remote.
@@ -300,10 +305,14 @@ impl Project {
                             }
                         }
                     };
-
-
-                    info!("uploading file {:?} to {:}", data_file.path, remote.name());
-                    remote.upload(&data_file, &path_context).await?;
+                    
+                    let mut num_uploaded = 0;
+                    if do_upload {
+                        info!("uploading file {:?} to {:}", data_file.path, remote.name());
+                        remote.upload(&data_file, &path_context).await?;
+                        num_uploaded += 1;
+                    }
+                    println!("Uploaded {} files.", num_uploaded);
                 }
             }
         }

@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::data::{StatusEntry,LocalStatusCode};
 use super::remote::{Remote};
 
+
 pub fn load_file(path: &PathBuf) -> String {
     let mut file = File::open(&path).expect("unable to open file");
     let mut contents = String::new();

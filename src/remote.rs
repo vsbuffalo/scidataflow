@@ -17,6 +17,26 @@ use crate::dryad::{DataDryadAPI};
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemoteFile {
+    pub name: String,
+    pub md5: Option<String>,
+    pub size: Option<u64>,
+    pub remote_id: Option<String>
+}
+
+impl RemoteFile {
+    pub fn set_md5(&mut self, md5: String) {
+        self.md5 = Some(md5);
+    }
+    pub fn get_md5(&self) -> Option<String> {
+        self.md5.clone()
+    }
+    pub fn set_size(&mut self, size: u64) {
+        self.size = Some(size);
+    }
+}
+
 #[derive(Serialize, Deserialize,  PartialEq, Debug)]
 pub struct AuthKeys {
     keys: HashMap<String,String>
@@ -100,30 +120,33 @@ impl Remote {
         }
     }
 
-   pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
+    pub async fn get_files(&self) -> Result<Vec<RemoteFile>> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.get_files().await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.get_remote_files().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
 
-   pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareArticle>> {
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,RemoteFile>> {
+        // now we can use the common interface!
+        let remote_files = self.get_files().await?;
+        let mut file_map: HashMap<String,RemoteFile> = HashMap::new();
+        for file in remote_files.into_iter() {
+            file_map.insert(file.name.clone(), file.clone());
+        }
+        Ok(file_map)
+    }
+
+    pub async fn track(&mut self) -> Result<(),String> {
+        Ok(())
+    }
+
+    pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.get_files_hashmap().await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-
-   pub async fn track(&mut self) -> Result<(),String> {
-       Ok(())
-   }
-
-   pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
-       match self {
-           Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context).await,
-           Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
-       }
-   }
 
 }
 

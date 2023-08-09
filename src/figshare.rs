@@ -10,9 +10,11 @@ use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 use reqwest::{Method, header::{HeaderMap, HeaderValue}};
 use reqwest::{Client, Response};
+use colored::Colorize;
 
+use crate::warning;
 use crate::data::DataFile;
-use crate::remote::AuthKeys;
+use crate::remote::{AuthKeys, RemoteFile};
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
 
@@ -262,7 +264,16 @@ impl<'a> FigShareUpload<'a> {
     }
 }
 
-
+impl From<FigShareArticle> for RemoteFile {
+    fn from(fgsh: FigShareArticle) -> Self {
+        RemoteFile {
+            name: fgsh.title,
+            md5: fgsh.md5,
+            size: fgsh.size,
+            remote_id: Some(format!("{}", fgsh.id)),
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FigShareArticle {
@@ -316,10 +327,10 @@ impl FigShareAPI {
                 format!("{}{}", self.base_url, url.trim_start_matches('/'))
             };
 
-            debug!("request URL: {:?}", full_url);
+            trace!("request URL: {:?}", full_url);
 
             headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
-            debug!("headers: {:?}", headers);
+            trace!("headers: {:?}", headers);
 
             let client = Client::new();
             let response = match data {
@@ -365,7 +376,7 @@ impl FigShareAPI {
     pub async fn get_projects(&self) -> Result<Vec<Value>> {
         let url = "/account/projects";
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
-        debug!("reponse: {:?}", response);
+        trace!("reponse: {:?}", response);
         let data = response.json::<Vec<Value>>().await?;
         Ok(data)
     }
@@ -399,7 +410,7 @@ impl FigShareAPI {
     pub async fn create_project(&self) -> Result<Value> {
         let title = &self.name;
         let existing_id = self.check_project_exists().await?;
-        debug!("existing_id: {:?}", existing_id);
+        trace!("existing_id: {:?}", existing_id);
         if existing_id.is_some() {
             return Err(anyhow!("A project with the title '{}' already exists", title));
         }
@@ -413,7 +424,7 @@ impl FigShareAPI {
         let data: HashMap<_, _> = data.into_iter().collect();
 
         let response = self.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
-        debug!("response: {:?}", response);
+        trace!("response: {:?}", response);
         let data = response.json::<Value>().await?;
         info!("created remote project: {:?}", title);
         Ok(data)
@@ -423,7 +434,7 @@ impl FigShareAPI {
         let existing_id = self.check_project_exists().await?;
         let project_id = match existing_id {
             Some(id) => {
-                debug!("set_project() found an existing project (ID={:?})", id);
+                info!("Found an existing FigShare project (ID={:?}).", id);
                 Ok(id)
             },
             None => match self.create_project().await {
@@ -442,33 +453,45 @@ impl FigShareAPI {
         Ok(project_id)
     }
 
-    pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
-        let project_id = match self.project_id {
-            None => Err(anyhow!("The project ID is not set.")),
-            Some(id) => Ok(id),
-        };
-        debug!("get_files(): project_id={:?}", project_id);
-        let url = format!("/account/projects/{}/articles", project_id?);
+    /// Get FigShare remote files as FigShareArticle
+    /// (for internal FigShare stuff, main interface is through the 
+    /// common RemoteFile).
+    async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
+        let project_id = self.project_id.ok_or_else(|| anyhow!("The project ID is not set."))?;
+        trace!("get_data(): project_id={:?}", project_id);
+        let url = format!("/account/projects/{}/articles", project_id);
 
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
-        let articles: Vec<FigShareArticle> = response.json().await?;
-        debug!("articles: {:?}", articles);
+        let mut articles: Vec<FigShareArticle> = response.json().await?;
 
-        println!("Warning: FigShare has multiple files with the \
-                 same name (as different 'articles'). This can lead \
-                 to problems, and these should be removed manually \
-                 on FigShare.com.");
+        // now we need to add in the supplementary FigShareArticle info
+        for article in articles.iter_mut() {
+            self.set_article_info(article).await?;
+            info!("ARTICLE: {:?}", article);
+        }
+
+        if check_for_duplicate_article_titles(&articles).len() > 0 {
+            warning!("FigShare has multiple files with the \
+                     same name (as different 'articles'). This can lead \
+                     to problems, and these should be removed manually \
+                     on FigShare.com.");
+        }
         Ok(articles)
+        }
+
+    pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
+        let articles = self.get_files().await?;
+        let remote_files = articles.into_iter().map(RemoteFile::from).collect();
+        Ok(remote_files)
     }
 
-
+    // This returns the unique FigShareArticles
+    // Warning: There can be clashing here!
     pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareArticle>> {
-        let articles = self.get_files().await?;
+        let mut articles: Vec<FigShareArticle> = self.get_files().await?;
         let mut article_hash: HashMap<String,FigShareArticle> = HashMap::new();
-        for mut article in articles.into_iter() {
-            let article_info = self.get_article_info(&article).await?;
-            article.set_md5(article_info.computed_md5);
-            article.set_size(article_info.size);
+        for article in articles.iter_mut() {
+            self.set_article_info(article).await?;
             article_hash.insert(article.title.clone(), article.clone());
         }
         Ok(article_hash)
@@ -487,7 +510,29 @@ impl FigShareAPI {
         }
     }
 
+    pub async fn set_article_info(&self, article: &mut FigShareArticle) -> Result<()> {
+        let info = self.get_article_info(&article).await?;
+        info!("INFO: {:?}", info);
+        article.set_md5(info.computed_md5);
+        article.set_size(info.size);
+        Ok(())
+    }
+
     pub async fn track(&self) -> Result<()> {
         Ok(())
     }
+}
+
+
+fn check_for_duplicate_article_titles(articles: &Vec<FigShareArticle>) -> HashSet<String> {
+    let mut titles = HashSet::new();
+    let mut duplicates = HashSet::new();
+    
+    for article in articles {
+        if !titles.insert(article.title.clone()) {
+            duplicates.insert(article.title.clone());
+        }
+    }
+
+    duplicates
 }

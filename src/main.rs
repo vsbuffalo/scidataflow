@@ -13,6 +13,7 @@ pub mod traits;
 pub mod remote;
 pub mod figshare;
 pub mod dryad;
+pub mod macros;
 
 const INFO: &str = "\
 SciFlow: Manage and Share Scientific Data
