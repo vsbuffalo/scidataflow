@@ -23,4 +23,6 @@ anywhere with the commands:
 
 
 ## TODO
- - remove modified 
+
+ - wrap git, do something like `scf clone` that pulls in Git repo.
+ - recursive pulling.

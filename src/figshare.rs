@@ -467,7 +467,6 @@ impl FigShareAPI {
         // now we need to add in the supplementary FigShareArticle info
         for article in articles.iter_mut() {
             self.set_article_info(article).await?;
-            info!("ARTICLE: {:?}", article);
         }
 
         if check_for_duplicate_article_titles(&articles).len() > 0 {
@@ -512,7 +511,6 @@ impl FigShareAPI {
 
     pub async fn set_article_info(&self, article: &mut FigShareArticle) -> Result<()> {
         let info = self.get_article_info(&article).await?;
-        info!("INFO: {:?}", info);
         article.set_md5(info.computed_md5);
         article.set_size(info.size);
         Ok(())

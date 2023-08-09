@@ -1,5 +1,3 @@
-use colored::*;
-
 #[macro_export]
 macro_rules! warning {
     ($($arg:tt)*) => {

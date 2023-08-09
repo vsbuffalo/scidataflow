@@ -7,7 +7,7 @@ use log::{info, trace, debug};
 use std::io::{Write};
 
 use crate::data::{DataFile,DataCollection};
-use crate::utils::{load_file,ensure_directory,print_status};
+use crate::utils::{load_file,print_status};
 use crate::remote::{AuthKeys,authenticate_remote};
 use crate::remote::Remote;
 use crate::figshare::FigShareAPI;
@@ -138,11 +138,18 @@ impl Project {
         Ok(self.relative_path(path)?.to_string_lossy().to_string())
     }
 
-    pub fn status(&self) -> Result<()> {
+    pub async fn status(&mut self, include_remotes: bool) -> Result<()> {
+        let remotes = if include_remotes {
+            self.data.authenticate_remotes()?;
+            Some(&self.data.remotes)
+        } else {
+            None
+        };
+
         let abbrev = Some(8);
         let mut rows: Vec<StatusEntry> = Vec::new();
         for value in self.data.files.values() {
-            let entry = value.status_info(&self.path_context(), abbrev)?;
+            let entry = value.status_info(&self.path_context(), remotes, abbrev).await?;
             rows.push(entry);
         }
         print_status(rows, Some(&self.data.remotes));
@@ -167,7 +174,8 @@ impl Project {
             let entry = StatusEntry {
                 local_status: LocalStatusCode::Invalid, 
                 remote_status: None,
-                tracked: false,
+                tracked: Some(false),
+                remote_service: None,
                 cols: Some(cols) };
             rows.push(entry);
         }
@@ -274,7 +282,7 @@ impl Project {
         for (dir, remote) in self.data.remotes.iter() {
             let existing_files = remote.get_files_hashmap().await?;
             info!("existing files: {:?}", existing_files);
-            for data_files in data_dirs.get(dir) {
+            if let Some(data_files) = data_dirs.get(dir) {
                 for data_file in data_files {
                     if !data_file.tracked {
                         info!("file {} not tracked, skipping", data_file.path);
@@ -305,7 +313,7 @@ impl Project {
                             }
                         }
                     };
-                    
+
                     let mut num_uploaded = 0;
                     if do_upload {
                         info!("uploading file {:?} to {:}", data_file.path, remote.name());

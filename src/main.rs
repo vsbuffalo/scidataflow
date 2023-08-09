@@ -68,6 +68,9 @@ enum Commands {
     #[structopt(name = "status")]
     /// Show status of data.
     Status {
+        /// Show remotes status
+        #[structopt(long)]
+        remotes: bool
     },
 
     #[structopt(name = "stats")]
@@ -151,9 +154,9 @@ async fn run() -> Result<()> {
         Some(Commands::Init {  }) => {
             Project::init()
         }
-        Some(Commands::Status {  }) => {
-            let proj = Project::new()?;
-            proj.status()
+        Some(Commands::Status { remotes }) => {
+            let mut proj = Project::new()?;
+            proj.status(*remotes).await
         }
         Some(Commands::Stats {  }) => {
             let proj = Project::new()?;

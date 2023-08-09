@@ -11,11 +11,21 @@ use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 
-use crate::data::DataFile;
+use crate::utils::ensure_exists;
+use crate::data::{DataFile,LocalStatusCode};
 use crate::figshare::{FigShareAPI,FigShareArticle};
 use crate::dryad::{DataDryadAPI};
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
+
+#[derive(PartialEq,Clone)]
+pub enum RemoteStatusCode {
+   NotExists,
+   Current,
+   MD5Mismatch,
+   NoMD5,
+   Invalid
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteFile {
@@ -148,6 +158,49 @@ impl Remote {
         }
     }
 
+    pub async fn file_status(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<(String, RemoteStatusCode)> {
+        if !data_file.is_alive(path_context) {
+            return Err(anyhow!("Data file '{}' no longer exists!", data_file.path));
+        }
+        let path = data_file.full_path(path_context)?;
+        let file_name = path.file_name()
+            .ok_or(anyhow!("Invalid path: {:?}", path))?
+            .to_string_lossy()
+            .to_string();
+
+        let remote_files = self.get_files().await?;
+        let service = self.name().to_string();
+
+        // Check if the DataFile is clean
+        if data_file.tracked && data_file.status(path_context)?.local_status != LocalStatusCode::Current {
+            // Not comparing as it's "unclean"
+            return Err(anyhow!("The data file '{}' is tracked by a remote and \
+                               has changed locally; its MD5 hash in the data \
+                               manifest differs from its true MD5.\nPlease run: \
+                               swf update.", data_file.path));
+        }
+
+        // Do we have a remote file that matches this DataFile's name?
+        if let Some(remote_file) = remote_files.iter().find(|f| f.name == file_name) {
+            // Let's now compare MD5s
+            if let Some(remote_md5) = &remote_file.md5 {
+                if let Ok(Some(local_md5)) = data_file.get_md5(&path_context) {
+                    if local_md5 == *remote_md5 {
+                        Ok((service, RemoteStatusCode::Current))
+                    } else {
+                        Ok((service, RemoteStatusCode::MD5Mismatch))
+                    }
+                } else {
+                    return Err(anyhow!("Cannot get MD5 of data file '{}'. Is it tracked?", data_file.path))
+                }
+            } else {
+                Ok((service, RemoteStatusCode::NoMD5))
+            }
+        } else {
+            Ok((service, RemoteStatusCode::NotExists))
+        }
+
+    }
 }
 
 pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
