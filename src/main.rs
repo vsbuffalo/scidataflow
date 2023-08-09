@@ -55,7 +55,8 @@ enum Commands {
     /// Add a data file to the manifest.
     Add {
         /// the file to begin tracking.
-        filename: String,
+        #[structopt(name = "filenames", required = true)]
+        filenames: Vec<String>,
     },
 
     #[structopt(name = "init")]
@@ -142,9 +143,9 @@ async fn run() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
-        Some(Commands::Add { filename }) => {
+        Some(Commands::Add { filenames }) => {
             let mut proj = Project::new()?;
-            proj.add(filename)
+            proj.add(filenames)
         }
         Some(Commands::Init {  }) => {
             Project::init()

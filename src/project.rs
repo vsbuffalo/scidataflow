@@ -11,7 +11,7 @@ use crate::utils::{load_file,ensure_directory,print_status};
 use crate::remote::{AuthKeys,authenticate_remote};
 use crate::remote::Remote;
 use crate::figshare::FigShareAPI;
-use crate::data::{StatusEntry,StatusCode};
+use crate::data::{StatusEntry,LocalStatusCode};
 use crate::traits::Status;
 use crate::utils::{format_bytes};
 
@@ -124,7 +124,7 @@ impl Project {
 
     pub fn relative_path(&self, path: &Path) -> Result<PathBuf> {
         let absolute_path = canonicalize(path)?;
-        ensure_directory(&absolute_path)?;
+        //ensure_directory(&absolute_path)?;
         let path_context = canonicalize(self.path_context())?;
 
         // Compute relative path directly using strip_prefix
@@ -152,7 +152,7 @@ impl Project {
     pub fn is_clean(&self) -> Result<bool> {
         for data_file in self.data.files.values() {
             let status = data_file.status(&self.path_context())?;
-            if status != StatusCode::Current {
+            if status.local_status != LocalStatusCode::Current {
                 return Ok(false);
             }
         }
@@ -164,7 +164,11 @@ impl Project {
         for (key, data_file) in self.data.files.iter() {
             let size = format_bytes(data_file.get_size(&self.path_context())?);
             let cols = vec![key.clone(), size];
-            let entry = StatusEntry { status: StatusCode::Invalid, cols };
+            let entry = StatusEntry {
+                local_status: LocalStatusCode::Invalid, 
+                remote_status: None,
+                tracked: false,
+                cols: Some(cols) };
             rows.push(entry);
         }
         print_status(rows, None);
@@ -172,11 +176,16 @@ impl Project {
     }
 
 
-    pub fn add(&mut self, filepath: &String) -> Result<()> {
-        let filename = self.relative_path_string(Path::new(filepath))?;
-
-        let data_file = DataFile::new(filename, self.path_context())?;
-        self.data.register(data_file)?;
+    pub fn add(&mut self, files: &Vec<String>) -> Result<()> {
+        let mut added_files = 0;
+        for filepath in files {
+            let filename = self.relative_path_string(Path::new(&filepath.clone()))?;
+            let data_file = DataFile::new(filename.clone(), self.path_context())?;
+            info!("Adding file '{}'.", filename);
+            self.data.register(data_file)?;
+            added_files += 1;
+        }
+        println!("Added {} files.", added_files);
         self.save()
     }
 
@@ -232,7 +241,10 @@ impl Project {
             //}
             authenticate_remote(remote)?;
             let files = remote.get_files().await?;
-            println!("{} files:\n{:?}", key, files);
+            println!("{} files:", key);
+            for file in files {
+                println!(" - {:?}", file);
+            }
         }
         Ok(())
     }
@@ -259,31 +271,36 @@ impl Project {
 
         let data_dirs = self.data.get_files_by_directory()?;
 
-        for (dir, remote) in &self.data.remotes {
-            let existing_files = remote.get_files().await?;
+        for (dir, remote) in self.data.remotes.iter() {
+            let existing_files = remote.get_files_hashmap().await?;
             for data_files in data_dirs.get(dir) {
                 for data_file in data_files {
                     if !data_file.tracked {
+                        debug!("file {} not tracked, skipping", data_file.path);
                         continue;
                     }
+
+                    // should we do the upload? 
                     let do_upload: bool = match existing_files.get(&data_file.path) {
-                        None => {
-                            // remote does not exist, upload.
-                            true
-                        },
+                        None => true, // file does not exist on remote, upload.
                         Some(existing_remote) => {
-                            let existing_md5 = match existing_remote.get_md5() {
-                                None => Err("The "),
-                                Some(md5) => {
-                                }
-                            }
-                            if == data_file.md5 {
-                                info!("file '{}' is not being uploaded because it exists \
-                                      on the remote and the MD5s match.", data_file.path);
-                                false
+                            match existing_remote.get_md5() {
+                                // edge case: the MD5 is not yet in the remote.
+                                None => return Err(anyhow!("Internal Error: MD5 not found in remote. Please report.")),
+
+                                // check MD5s; if different, then upload.
+                                Some(md5) if md5 == data_file.md5 => {
+                                    info!("file '{}' is not being uploaded because it exists \
+                                          on the remote and the MD5s match.", data_file.path);
+                                    false
+                                },
+
+                                // MD5s don't match, upload.
+                                Some(_) => true,
                             }
                         }
-                    }
+                    };
+
 
                     info!("uploading file {:?} to {:}", data_file.path, remote.name());
                     remote.upload(&data_file, &path_context).await?;

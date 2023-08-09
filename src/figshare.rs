@@ -5,7 +5,7 @@ use std::io::{Read,Seek,SeekFrom};
 use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
-use std::collections::HashMap;
+use std::collections::{HashSet,HashMap};
 use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 use reqwest::{Method, header::{HeaderMap, HeaderValue}};
@@ -116,7 +116,7 @@ impl<'a> FigShareUpload<'a> {
     }
 
     pub async fn get_article(&self, data_file: &DataFile) -> Result<Option<FigShareArticle>> {
-        let remote_files = self.api_instance.get_files().await?;
+        let remote_files = self.api_instance.get_files_hashmap().await?;
         let found_article = remote_files.values()
             .find(|article| &article.title == &data_file.path)
             .cloned();
@@ -279,7 +279,7 @@ impl FigShareArticle {
         self.md5 = Some(md5);
     }
     pub fn get_md5(&self) -> Option<String> {
-        self.md5
+        self.md5.clone()
     }
     pub fn set_size(&mut self, size: u64) {
         self.size = Some(size);
@@ -442,7 +442,7 @@ impl FigShareAPI {
         Ok(project_id)
     }
 
-    pub async fn get_files(&self) -> Result<HashMap<String,FigShareArticle>> {
+    pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
         let project_id = match self.project_id {
             None => Err(anyhow!("The project ID is not set.")),
             Some(id) => Ok(id),
@@ -454,6 +454,16 @@ impl FigShareAPI {
         let articles: Vec<FigShareArticle> = response.json().await?;
         debug!("articles: {:?}", articles);
 
+        println!("Warning: FigShare has multiple files with the \
+                 same name (as different 'articles'). This can lead \
+                 to problems, and these should be removed manually \
+                 on FigShare.com.");
+        Ok(articles)
+    }
+
+
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareArticle>> {
+        let articles = self.get_files().await?;
         let mut article_hash: HashMap<String,FigShareArticle> = HashMap::new();
         for mut article in articles.into_iter() {
             let article_info = self.get_article_info(&article).await?;

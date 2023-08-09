@@ -100,9 +100,16 @@ impl Remote {
         }
     }
 
-   pub async fn get_files(&self) -> Result<HashMap<String,FigShareArticle>> {
+   pub async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.get_files().await,
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+        }
+    }
+
+   pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareArticle>> {
+        match self {
+            Remote::FigShareAPI(figshare_api) => figshare_api.get_files_hashmap().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }

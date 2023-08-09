@@ -15,17 +15,28 @@ use crate::traits::Status;
 use super::utils::{format_mod_time,compute_md5};
 use super::remote::{Remote};
 
-#[derive( PartialEq)]
-pub enum StatusCode {
+#[derive(PartialEq,Clone)]
+pub enum LocalStatusCode {
    Current,
    Changed,
    Deleted,
    Invalid
 }
 
+#[derive(PartialEq,Clone)]
+pub enum RemoteStatusCode {
+   NotExists,
+   Exists,
+   MD5Mismatch,
+   Invalid
+}
+
+#[derive(Clone)]
 pub struct StatusEntry {
-    pub status: StatusCode,
-    pub cols: Vec<String>
+    pub local_status: LocalStatusCode,
+    pub remote_status: Option<RemoteStatusCode>,
+    pub tracked: bool,
+    pub cols: Option<Vec<String>>
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -99,15 +110,28 @@ impl DataFile {
         }
     }
 
-    pub fn status(&self, path_context: &PathBuf) -> Result<StatusCode> {
+    pub fn status(&self, path_context: &PathBuf) -> Result<StatusEntry> {
         let is_alive = self.is_alive(path_context);
         let is_changed = self.is_changed(path_context)?;
-        Ok(match (is_changed, is_alive) {
-            (false, true) => StatusCode::Current,
-            (true, true) => StatusCode::Changed,
-            (false, false) => StatusCode::Deleted,
-            _ => StatusCode::Invalid,
-        })
+        let local_status = match (is_changed, is_alive) {
+            (false, true) => LocalStatusCode::Current,
+            (true, true) => LocalStatusCode::Changed,
+            (false, false) => LocalStatusCode::Deleted,
+            _ => LocalStatusCode::Invalid,
+        };
+        Ok(StatusEntry { 
+            local_status,
+            remote_status: None,
+            tracked: self.tracked,
+            cols: None
+        }) 
+    }
+    // Do a merge on paths, and fold in remote status.
+    // Merge is all-way.
+    pub fn status_with_remotes(&self, path_context: &PathBuf, remotes: HashMap<String,Remote>) -> Result<StatusEntry> {
+        let mut status_entry = self.status(&path_context)?;
+        // TODO add in the remote info
+        Ok(status_entry)
     }
     pub fn update_md5(&mut self, path_context: &PathBuf) -> Result<()> {
         let new_md5 = match self.get_md5(&path_context)? {
@@ -140,6 +164,7 @@ fn shorten(hash: &String, abbrev: Option<i32>) -> String {
     hash.chars().take(n).collect()
 }
 
+// TODO: this recieve a StatusEntry
 impl Status for DataFile {
     fn status_info(&self, path_context: &PathBuf, n: Option<i32>) -> Result<StatusEntry> {
         //let is_updated = self.is_updated(path_context);
@@ -147,10 +172,13 @@ impl Status for DataFile {
         let old_md5 = &self.md5;
         let mod_time = self.get_mod_time(path_context)?;
         let status = self.status(path_context)?;
+        // TODO add remote status here
+        //let status = self.status(path_context)?;
 
-        let md5_string = match status {
-            StatusCode::Current => format!("{}", shorten(&old_md5, n)),
-            StatusCode::Changed => {
+
+        let md5_string = match status.local_status {
+            LocalStatusCode::Current => format!("{}", shorten(&old_md5, n)),
+            LocalStatusCode::Changed => {
                 match new_md5 {
                     Some(new_md5) => format!("{}→{}", shorten(&old_md5, n), shorten(&new_md5, n)),
                     None => return Err(anyhow!("Error: new MD5 not available")),
@@ -162,11 +190,11 @@ impl Status for DataFile {
         let mod_time_pretty = format_mod_time(mod_time);
 
         // append a status message column
-        let status_msg = match status {
-            StatusCode::Current => "current",
-            StatusCode::Changed => "changed",
-            StatusCode::Deleted => "deleted",
-            StatusCode::Invalid => "invalid",
+        let status_msg = match status.local_status {
+            LocalStatusCode::Current => "current",
+            LocalStatusCode::Changed => "changed",
+            LocalStatusCode::Deleted => "deleted",
+            LocalStatusCode::Invalid => "invalid",
         };
 
         let columns = vec![
@@ -176,7 +204,12 @@ impl Status for DataFile {
             mod_time_pretty,
         ];
 
-        Ok(StatusEntry { status: status, cols: columns })
+        Ok(StatusEntry {
+            local_status: status.local_status.clone(),
+            remote_status: None,
+            tracked: self.tracked,
+            cols: Some(columns),
+        })
     }
 }
 

@@ -11,7 +11,7 @@ use log::{info, trace, debug};
 use colored::*;
 use unicode_width::UnicodeWidthStr;
 
-use crate::data::{StatusEntry, StatusCode};
+use crate::data::{StatusEntry,LocalStatusCode};
 use super::remote::{Remote};
 
 pub fn load_file(path: &PathBuf) -> String {
@@ -62,14 +62,23 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
 
     let max_cols = rows.values()
         .flat_map(|v| v.iter())
-        .map(|entry| entry.cols.len())
-        .max().unwrap_or(0);
+        .filter_map(|entry| {
+            match &entry.cols {
+                None => None,
+                Some(cols) => Some(cols.len())
+            }
+        })
+        .max()
+        .unwrap_or(0);
+
     let mut max_lengths = vec![0; max_cols];
 
     // compute max lengths across all rows
     for entry in rows.values().flat_map(|v| v.iter()) {
-        for (i, col) in entry.cols.iter().enumerate() {
-            max_lengths[i] = max_lengths[i].max(col.width());
+        if let Some(cols) = &entry.cols {
+            for (i, col) in cols.iter().enumerate() {
+                max_lengths[i] = max_lengths[i].max(col.width());
+            }
         }
     }
     // debug!("max_lengths: {:?}", max_lengths);
@@ -84,20 +93,22 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
         // Print the rows with the correct widths
         for row in value {
             let mut fixed_row = Vec::new();
-            let status = &row.status;
-            for (i, col) in row.cols.iter().enumerate() {
+            let status = &row.local_status;
+            if let Some(cols) = &row.cols {
+                for (i, col) in cols.iter().enumerate() {
                 // push a fixed-width column to vector
-                let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
-                fixed_row.push(fixed_col);
+                    let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
+                    fixed_row.push(fixed_col);
+                }
             }
             let spacer = " ".repeat(nspaces);
 
             // color row
             let status_line = fixed_row.join(&spacer);
             let status_line = match status {
-                    StatusCode::Current => status_line.green().to_string(),
-                    StatusCode::Changed => status_line.red().to_string(),
-                    _ => status_line
+                LocalStatusCode::Current => status_line.green().to_string(),
+                LocalStatusCode::Changed => status_line.red().to_string(),
+                _ => status_line
             };
             println!("{}{}", " ".repeat(indent), status_line);
         }
@@ -109,11 +120,13 @@ fn organize_by_dir(rows: Vec<StatusEntry>) -> HashMap<String, Vec<StatusEntry>> 
     let mut dir_map: HashMap<String, Vec<StatusEntry>> = HashMap::new();
 
     for entry in rows {
-        if let Some(first_elem) = entry.cols.first() {
-            let path = Path::new(first_elem);
-            if let Some(parent_path) = path.parent() {
-                let parent_dir = parent_path.to_string_lossy().into_owned();
-                dir_map.entry(parent_dir).or_default().push(entry);
+        if let Some(cols) = &entry.cols {
+            if let Some(first_elem) = cols.first() {
+                let path = Path::new(first_elem);
+                if let Some(parent_path) = path.parent() {
+                    let parent_dir = parent_path.to_string_lossy().into_owned();
+                    dir_map.entry(parent_dir).or_default().push(entry);
+                }
             }
         }
     }
@@ -170,13 +183,13 @@ pub fn format_bytes(size: u64) -> String {
 pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration_since_mod = now.signed_duration_since(mod_time);
-    
+
     // convert chrono::Duration to std::time::Duration
     let std_duration = std::time::Duration::new(
         duration_since_mod.num_seconds() as u64,
         0
-    );
-    
+        );
+
     let formatter = Formatter::new();
     let local_time = mod_time.with_timezone(&Local);
     let timestamp = local_time.format("%Y-%m-%d %l:%M%p").to_string();
