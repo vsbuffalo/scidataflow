@@ -12,7 +12,7 @@ use reqwest::{Method, header::{HeaderMap, HeaderValue}};
 use reqwest::{Client, Response};
 use colored::Colorize;
 
-use crate::warning;
+use crate::print_warn;
 use crate::data::DataFile;
 use crate::remote::{AuthKeys, RemoteFile};
 
@@ -367,8 +367,16 @@ impl FigShareAPI {
         this_upload.upload(data_file, path_context).await?;
         Ok(())
     }
-    fn download(&self) {
+
+    pub async fn download(&self, data_file: &DataFile, path_context: &PathBuf,
+                          overwrite: bool) -> Result<()>{
+        if data_file.is_alive(path_context) && !overwrite {
+            return Err(anyhow!("Data file '{}' exists locally, and would be \
+                               overwritten by download. Use --overwrite.", data_file.path));
+        }
+        Ok(())
     }
+
     fn ls(&self) {
     }
 
@@ -470,10 +478,10 @@ impl FigShareAPI {
         }
 
         if check_for_duplicate_article_titles(&articles).len() > 0 {
-            warning!("FigShare has multiple files with the \
-                     same name (as different 'articles'). This can lead \
-                     to problems, and these should be removed manually \
-                     on FigShare.com.");
+            print_warn!("FigShare has multiple files with the \
+                           same name (as different 'articles'). This can lead \
+                           to problems, and these should be removed manually \
+                           on FigShare.com.");
         }
         Ok(articles)
         }
@@ -483,6 +491,11 @@ impl FigShareAPI {
         let remote_files = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
+
+    /// Given a list of local files, find them on the remote and download them
+    /// all.
+    //pub async fn download(&self, data_files: Vec<DataFile>) {
+    //}
 
     // This returns the unique FigShareArticles
     // Warning: There can be clashing here!

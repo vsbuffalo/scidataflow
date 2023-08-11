@@ -5,7 +5,9 @@ use std::path::{Path,PathBuf};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::io::{Write};
+use colored::Colorize;
 
+use crate::{print_warn,print_info};
 use crate::data::{DataFile,DataCollection};
 use crate::utils::{load_file,print_status};
 use crate::remote::{AuthKeys,authenticate_remote};
@@ -139,6 +141,8 @@ impl Project {
     }
 
     pub async fn status(&mut self, include_remotes: bool) -> Result<()> {
+        // if include_remotes (e.g. --remotes) is set, we need to merge
+        // in the remotes, so we authenticate first and then get them.
         let remotes = if include_remotes {
             self.data.authenticate_remotes()?;
             Some(&self.data.remotes)
@@ -237,20 +241,10 @@ impl Project {
     }
 
     pub async fn ls(&mut self) -> Result<()> {
-        for (key, remote) in &mut self.data.remotes {
-            //let all_projects: ResponseResults = remote.get_projects().await;
-            //match all_projects {
-            //    Ok(projects) => {
-            //        for project in projects {
-            //            println!("project ID = {:?}", project.get("id"))
-            //        }
-            //    },
-            //    Err(err) => eprintln!("Error while getting projects: {}", err),
-            //}
-            authenticate_remote(remote)?;
-            let files = remote.get_files().await?;
-            println!("{} files:", key);
-            for file in files {
+        let all_remote_files = self.data.merge().await?;
+        for (remote, remote_files) in all_remote_files.iter() {
+            println!("Remote: {}", remote);
+            for file in remote_files.values() {
                 println!(" - {:?}", file);
             }
         }
@@ -269,6 +263,23 @@ impl Project {
         self.save()
     }
 
+    pub async fn pull(&mut self, dirs: &Vec<PathBuf>, overwrite: bool) -> Result<()> {
+        let path_context = self.path_context();
+        // TODO before any pull, we need to make sure that the project
+        // status is "clean" e.g. nothing out of data.
+        self.data.authenticate_remotes()?;
+
+        //let files = remote.get_files().await?;
+
+        let mut num_downloaded = 0;
+        for (dir, remote) in self.data.remotes.iter() {
+
+        }
+ 
+        println!("Downloaded {} files.", num_downloaded);
+        Ok(())
+    }
+
     pub async fn push(&mut self) -> Result<()> {
         let path_context = self.path_context();
         // TODO before any push, we need to make sure that the project
@@ -279,6 +290,7 @@ impl Project {
 
         let data_dirs = self.data.get_files_by_directory()?;
 
+        let mut num_uploaded = 0;
         for (dir, remote) in self.data.remotes.iter() {
             let existing_files = remote.get_files_hashmap().await?;
             info!("existing files: {:?}", existing_files);
@@ -303,7 +315,7 @@ impl Project {
 
                                 // check MD5s; if different, then upload.
                                 Some(md5) if md5 == data_file.md5 => {
-                                    info!("file '{}' is not being uploaded because it exists \
+                                    print_info!("file '{}' is not being uploaded because it exists \
                                           on the remote and the MD5s match.", data_file.path);
                                     false
                                 },
@@ -314,16 +326,15 @@ impl Project {
                         }
                     };
 
-                    let mut num_uploaded = 0;
                     if do_upload {
-                        info!("uploading file {:?} to {:}", data_file.path, remote.name());
+                        print_info!("uploading file '{:?}' to {:}", data_file.path, remote.name());
                         remote.upload(&data_file, &path_context).await?;
                         num_uploaded += 1;
                     }
-                    println!("Uploaded {} files.", num_uploaded);
                 }
             }
         }
+        println!("Uploaded {} files.", num_uploaded);
         Ok(())
     }
 }

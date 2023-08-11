@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use anyhow::{anyhow,Result};
 use chrono::{Utc,Local};
 use timeago::Formatter;
@@ -121,7 +122,7 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
 
 // More specialized version of print_fixed_width() for statuses.
 // Handles coloring, manual annotation, etc 
-pub fn print_fixed_width_status(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
+pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
 
@@ -139,21 +140,10 @@ pub fn print_fixed_width_status(rows: HashMap<String, Vec<StatusEntry>>, nspaces
         let mut max_lengths = vec![0; max_cols];
 
         // compute max lengths across all rows
-        // Note, we also add in the tracked/untracked signifier here.
         for row in rows.values().flat_map(|v| v.iter()) {
             if let Some(cols) = &row.cols {
                 for (i, col) in cols.iter().enumerate() {
-                    // for the file path, annotate here whether tracked
-                    let adjusted_col = if i == 0 {
-                        match row.tracked {
-                            Some(true) => format!(" (T) {}", col),
-                            Some(false) => format!(" (U) {}", col),
-                            None => format!("     {}", col),
-                        }
-                    } else {
-                        col.to_string()
-                    };
-                    max_lengths[i] = max_lengths[i].max(adjusted_col.width());
+                    max_lengths[i] = max_lengths[i].max(col.width());
                 }
             }
         }
@@ -174,17 +164,8 @@ pub fn print_fixed_width_status(rows: HashMap<String, Vec<StatusEntry>>, nspaces
                 if let Some(cols) = &row.cols {
                     for (i, col) in cols.iter().enumerate() {
                         // push a fixed-width column to vector
-                        let col = if i == 0 {
-                            // for the file path, annotate here whether tracked
-                            match row.tracked {
-                                Some(true) => format!(" (T) {}", col),
-                                Some(false) => format!(" (U) {}", col),
-                                None => format!("     {}", col),
-                            }
-                        } else {
-                            col.to_string()
-                        };
-                        let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
+                        let spacer = if i == 0 { " " } else { "" };
+                        let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
                         fixed_row.push(fixed_col);
                     }
                 }
@@ -195,8 +176,11 @@ pub fn print_fixed_width_status(rows: HashMap<String, Vec<StatusEntry>>, nspaces
                 let status_line = match (tracked, local_status, remote_status) {
                     (Some(true), LocalStatusCode::Current, Some(RemoteStatusCode::Current)) => status_line.green().to_string(),
                     (Some(true), LocalStatusCode::Current, None) => status_line.green().to_string(),
-                    (Some(false), LocalStatusCode::Current, Some(RemoteStatusCode::Current)) => status_line.green().to_string(),
-                    (Some(false), LocalStatusCode::Current, None) => status_line.green().to_string(),
+                    // not tracked, but on remote
+                    (Some(false), LocalStatusCode::Current, Some(RemoteStatusCode::Current)) => status_line.cyan().to_string(),
+                    // not tracked, not on remote
+                    (Some(false), LocalStatusCode::Current, None) => status_line.yellow().to_string(),
+                    (Some(false), LocalStatusCode::Current, Some(RemoteStatusCode::NotExists)) => status_line.yellow().to_string(),
                     (None, LocalStatusCode::Current, None) => status_line.green().to_string(),
 
                     (Some(true), LocalStatusCode::Modified, _)  => status_line.red().to_string(),
@@ -212,8 +196,8 @@ pub fn print_fixed_width_status(rows: HashMap<String, Vec<StatusEntry>>, nspaces
         }
 }
 
-fn organize_by_dir(rows: Vec<StatusEntry>) -> HashMap<String, Vec<StatusEntry>> {
-    let mut dir_map: HashMap<String, Vec<StatusEntry>> = HashMap::new();
+fn organize_by_dir(rows: Vec<StatusEntry>) -> BTreeMap<String, Vec<StatusEntry>> {
+    let mut dir_map: BTreeMap<String, Vec<StatusEntry>> = BTreeMap::new();
 
     for entry in rows {
         if let Some(cols) = &entry.cols {
@@ -235,9 +219,9 @@ pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<String,Remot
 
     let organized_rows = organize_by_dir(rows);
 
-    let rows_by_dir: HashMap<String, Vec<StatusEntry>> = match remote {
+    let rows_by_dir: BTreeMap<String, Vec<StatusEntry>> = match remote {
         Some(remote_map) => {
-            let mut new_map = HashMap::new();
+            let mut new_map = BTreeMap::new();
             for (key, value) in organized_rows {
                 if let Some(remote) = remote_map.get(&key) {
                     let new_key = format!("{} > {}", key, remote.name());

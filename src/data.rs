@@ -7,13 +7,13 @@ use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use chrono::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use crate::traits::Status;
 
 use super::utils::{format_mod_time,compute_md5};
-use super::remote::{authenticate_remote,Remote,RemoteStatusCode};
+use super::remote::{authenticate_remote,Remote,RemoteStatusCode,RemoteFile};
 
 #[derive(PartialEq,Clone)]
 pub enum LocalStatusCode {
@@ -32,14 +32,33 @@ pub struct StatusEntry {
     pub remote_service: Option<String>
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataFile {
     pub path: String,
     pub tracked: bool,
     pub md5: String,
     pub size: u64,
-    pub remote_id: Option<String>,
     //modified: Option<DateTime<Utc>>,
+}
+
+// A merged DataFile and RemoteFile
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MergedFile {
+    pub local: Option<DataFile>,
+    pub remote: Option<RemoteFile>
+}
+
+impl MergedFile {
+    pub fn merge(data_file: &DataFile, remote_file: &RemoteFile) -> Result<MergedFile> {
+        if data_file.basename()? != remote_file.name {
+            return Err(anyhow!("Mismatch between local and remote file names"));
+        }
+
+        Ok(MergedFile {
+            local: Some(data_file.clone()),
+            remote: Some(remote_file.clone())
+        })
+    }
 }
 
 
@@ -58,7 +77,6 @@ impl DataFile {
             tracked: false, 
             md5: md5,
             size: size,
-            remote_id: None,
         })
     }
 
@@ -72,6 +90,15 @@ impl DataFile {
             Some(basename) => Ok(basename.to_string_lossy().to_string()),
             None => Err(anyhow!("could not get basename of '{}'", self.path))
         }
+    }
+
+    pub fn directory(&self) -> Result<String> {
+        let path = std::path::Path::new(&self.path);
+        Ok(path.parent()
+            .unwrap_or_else(|| path)
+            .to_str()
+            .unwrap_or("")
+            .to_string())
     }
 
     pub fn get_md5(&self, path_context: &PathBuf) -> Result<Option<String>> {
@@ -228,6 +255,8 @@ impl DataFile {
             mod_time_pretty,
         ];
 
+        // if we have a remote status (e.g. we talked to remotes)
+        // we add a column
         if let Some(status) = &remote_status {
             let remote_status_msg = match status {
                 RemoteStatusCode::NotExists => "not on remote",
@@ -236,21 +265,19 @@ impl DataFile {
                 RemoteStatusCode::NoMD5 => "no MD5 on remote",
                 RemoteStatusCode::Invalid => "invalid",
             };
-            let tracking_status = if self.tracked { "tracked" } else { "not tracked" };
+            let tracking_status = if self.tracked { "" } else { "not tracked" };
             let remote_status_msg = if self.tracked { remote_status_msg } else {""};
-            columns.push(format!("[{}] {}", tracking_status, remote_status_msg));
+            columns.push(format!("{}{}", tracking_status, remote_status_msg));
         }
 
         Ok(StatusEntry {
             local_status: local_status.clone(),
             remote_status: remote_status.clone(),
             tracked: Some(self.tracked),
-            remote_service: remote_service,
+            remote_service,
             cols: Some(columns),
         })
     }
-
-
 }
 
 fn shorten(hash: &String, abbrev: Option<i32>) -> String {
@@ -357,6 +384,7 @@ impl DataCollection {
                 return Err(anyhow!("Cannot add '{}' because it is a subdirectory of already tracked directory '{}'.", dir, existing_dir));
             }
         }
+        self.remotes.insert(dir.to_string(), remote);
         Ok(())
     }
 
@@ -405,6 +433,47 @@ impl DataCollection {
         }
         Ok(dir_map)
     }
+
+    // Fetch all remote files
+    pub async fn fetch(&mut self) -> Result<HashMap<String, HashMap<String,RemoteFile>>> {
+        self.authenticate_remotes()?;
+        let mut all_remote_files = HashMap::new();
+        for (path, remote) in &self.remotes {
+            let remote_files = remote.get_files_hashmap().await?;
+            all_remote_files.insert(path.clone(), remote_files);
+        }
+        Ok(all_remote_files)
+    }
+
+
+    pub async fn merge(&mut self) -> Result<HashMap<String, HashMap<String, MergedFile>>> {
+        let mut result: HashMap<String, HashMap<String, MergedFile>> = HashMap::new();
+
+        // Initialize the result with local files
+        for (name, local_file) in &self.files {
+            let dir = local_file.directory()?;
+            result.entry(dir).or_insert_with(HashMap::new)
+                .insert(name.clone(),
+                MergedFile { local: Some(local_file.clone()), remote: None });
+        }
+
+        // iterate through each remote and retrieve remote files
+        let all_remote_files = self.fetch().await?;
+        for (tracked_dir, remote_files) in all_remote_files.iter() {
+            // merge remote files with local files
+            for (name, remote_file) in remote_files {
+                // try to get the tracked directory; it doesn't exist make it
+                if let Some(merged_file) = result.entry(tracked_dir.clone())
+                    .or_insert_with(HashMap::new).get_mut(name) {
+                    merged_file.remote = Some(remote_file.clone());
+                } else {
+                    result.entry(tracked_dir.clone()).or_insert_with(HashMap::new).insert(name.to_string(), MergedFile { local: None, remote: Some(remote_file.clone()) });
+                }
+            }
+        }
+        Ok(result)
+    }
+
 }
 
 

@@ -4,6 +4,7 @@ use crate::project::Project;
 use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
+use std::path::PathBuf;
 use tokio;
 
 pub mod utils;
@@ -123,6 +124,18 @@ enum Commands {
     Push {
     },
 
+    #[structopt(name = "pull")]
+    /// Pull in all tracked files from the remote.
+    Pull {
+        // Overwrite local files?
+        #[structopt(long)]
+        overwrite: bool,
+
+        // Multiple optional directories
+        directories: Vec<PathBuf>,
+    },
+
+
 }
 
 pub fn print_errors(response: Result<()>) {
@@ -177,15 +190,19 @@ async fn run() -> Result<()> {
         Some(Commands::Track { filename }) => {
             let mut proj = Project::new()?;
             proj.track(filename)
-        }
+        },
         Some(Commands::Untrack { filename }) => {
             let mut proj = Project::new()?;
             proj.untrack(filename)
-        }
+        },
         Some(Commands::Push {}) => {
             let mut proj = Project::new()?;
             proj.push().await
-        }
+        },
+        Some(Commands::Pull { overwrite, directories }) => {
+            let mut proj = Project::new()?;
+            proj.pull(directories, *overwrite).await
+        },
         None => {
             println!("{}\n", INFO);
             std::process::exit(1);

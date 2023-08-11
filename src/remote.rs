@@ -158,6 +158,13 @@ impl Remote {
         }
     }
 
+    //pub async fn pull(&self, path_context: &PathBuf, overwrite: bool) -> Result<()> {
+    //    match self {
+    //        Remote::FigShareAPI(figshare_api) => figshare_api.download(path_context, overwrite).await,
+    //        Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+    //    }
+    //}
+
     pub async fn file_status(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<(String, RemoteStatusCode)> {
         if !data_file.is_alive(path_context) {
             return Err(anyhow!("Data file '{}' no longer exists!", data_file.path));
