@@ -173,12 +173,20 @@ impl Remote {
         Ok(())
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
+    pub async fn download(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+        match self {
+            Remote::FigShareAPI(figshare_api) => figshare_api.download(data_file, path_context, overwrite).await,
+            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+        }
+    }
+
+
 
     //pub async fn pull(&self, path_context: &PathBuf, overwrite: bool) -> Result<()> {
     //    match self {

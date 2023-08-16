@@ -5,7 +5,6 @@ use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::path::PathBuf;
-use tokio;
 
 pub mod utils;
 pub mod project;
@@ -122,6 +121,9 @@ enum Commands {
     #[structopt(name = "push")]
     /// Push all tracked files to remote.
     Push {
+        // Overwrite local files?
+        #[structopt(long)]
+        overwrite: bool,
     },
 
     #[structopt(name = "pull")]
@@ -132,7 +134,7 @@ enum Commands {
         overwrite: bool,
 
         // multiple optional directories
-        directories: Vec<PathBuf>,
+        //directories: Vec<PathBuf>,
     },
 
 
@@ -196,13 +198,13 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.untrack(filename)
         },
-        Some(Commands::Push {}) => {
+        Some(Commands::Push { overwrite }) => {
             let mut proj = Project::new()?;
-            proj.push().await
+            proj.push(*overwrite).await
         },
-        Some(Commands::Pull { overwrite, directories }) => {
+        Some(Commands::Pull { overwrite }) => {
             let mut proj = Project::new()?;
-            proj.pull(directories, *overwrite).await
+            proj.pull(*overwrite).await
         },
         None => {
             println!("{}\n", INFO);

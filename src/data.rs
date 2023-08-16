@@ -1,4 +1,4 @@
-use std::path::{PathBuf,Path, self};
+use std::path::{PathBuf,Path};
 use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
@@ -7,15 +7,15 @@ use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use chrono::prelude::*;
-use std::collections::{HashMap,HashSet,BTreeMap};
+use std::collections::{HashMap,BTreeMap};
 use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fs;
 use colored::*;
 
-use crate::traits::Status;
-use crate::utils::{format_mod_time,compute_md5, md5_status};
+use crate::{print_warn,print_info};
+use crate::utils::{format_mod_time,compute_md5, md5_status,pluralize};
 use crate::remote::{authenticate_remote,Remote,RemoteFile,RemoteStatusCode};
 
 // The status of a local data file, *conditioned* on it being in the manifest.
@@ -105,13 +105,15 @@ impl StatusEntry {
 
         if self.include_remotes() {
             let remote_status_msg = match &self.remote_status {
-                Some(RemoteStatusCode::Current) => "identical remote",
-                Some(RemoteStatusCode::MessyLocal) => "messy local",
-                Some(RemoteStatusCode::Different) => "different remote",
-                Some(RemoteStatusCode::NotExists) => "not on remote",
-                Some(RemoteStatusCode::NoLocal) => "unknown (messy remote)",
-                Some(RemoteStatusCode::Exists) => "  ???  ",
-                _ => "invalid"
+                Some(RemoteStatusCode::Current) => "identical remote".to_string(),
+                Some(RemoteStatusCode::MessyLocal) => "messy local".to_string(),
+                Some(RemoteStatusCode::Different) => {
+                    format!("different remote version ({:})", self.remote_md5_column(abbrev)?)
+                },
+                Some(RemoteStatusCode::NotExists) => "not on remote".to_string(),
+                Some(RemoteStatusCode::NoLocal) => "unknown (messy remote)".to_string(),
+                Some(RemoteStatusCode::Exists) => "  ???  ".to_string(),
+                _ => "invalid".to_string()
             };
             columns.push(remote_status_msg.to_string());
         }
@@ -178,7 +180,7 @@ impl MergedFile {
         self.local.as_ref().map(|data_file| data_file.tracked)
     }
 
-    pub fn local_md5(&self, path_context: &PathBuf) -> Option<String> {
+    pub fn local_md5(&self, path_context: &Path) -> Option<String> {
         self.local.as_ref()
             .and_then(|local| local.get_md5(path_context).ok())
             .flatten()
@@ -196,7 +198,7 @@ impl MergedFile {
         self.local.as_ref().map(|local| local.md5.clone())
     }
 
-    pub fn local_remote_md5_mismatch(&self, path_context: &PathBuf) -> Option<bool> {
+    pub fn local_remote_md5_mismatch(&self, path_context: &Path) -> Option<bool> {
         let local_md5 = self.local_md5(path_context);
         let remote_md5 = self.remote_md5();
         match (remote_md5, local_md5) {
@@ -205,13 +207,13 @@ impl MergedFile {
         }
     }
 
-    pub fn local_mod_time(&self, path_context: &PathBuf) -> Option<DateTime<Utc>> {
+    pub fn local_mod_time(&self, path_context: &Path) -> Option<DateTime<Utc>> {
         self.local.as_ref()
             .and_then(|data_file| data_file
                       .get_mod_time(path_context).ok())
     }
 
-    pub fn status(&self, path_context: &PathBuf) -> Result<RemoteStatusCode> {
+    pub fn status(&self, path_context: &Path) -> Result<RemoteStatusCode> {
         //let tracked = self.local.as_ref().map_or(None,|df| Some(df.tracked));
 
         // local status, None if no local file found
@@ -267,7 +269,7 @@ impl MergedFile {
 
 
     // Create a StatusEntry, for printing the status to the user.
-    pub async fn status_entry(&self, path_context: &PathBuf, include_remotes: bool) -> Result<StatusEntry> {
+    pub async fn status_entry(&self, path_context: &Path, include_remotes: bool) -> Result<StatusEntry> {
         let tracked = self.local.as_ref().map_or(None,|df| Some(df.tracked));
         let local_status = self.local
             .as_ref()
@@ -296,7 +298,7 @@ impl MergedFile {
 
 
 impl DataFile {
-    pub fn new(path: String, path_context: PathBuf) -> Result<DataFile> {
+    pub fn new(path: String, path_context: &Path) -> Result<DataFile> {
         let full_path = path_context.join(&path);
         let md5 = match compute_md5(&full_path)? {
             Some(md5) => md5,
@@ -313,7 +315,7 @@ impl DataFile {
         })
     }
 
-    pub fn full_path(&self, path_context: &PathBuf) -> Result<PathBuf> {
+    pub fn full_path(&self, path_context: &Path) -> Result<PathBuf> {
         Ok(path_context.join(self.path.clone()))
     }
 
@@ -334,17 +336,17 @@ impl DataFile {
            .to_string())
     }
 
-    pub fn get_md5(&self, path_context: &PathBuf) -> Result<Option<String>> {
+    pub fn get_md5(&self, path_context: &Path) -> Result<Option<String>> {
         compute_md5(&self.full_path(path_context)?)
     }
 
-    pub fn get_mod_time(&self, path_context: &PathBuf) -> Result<DateTime<Utc>> {
+    pub fn get_mod_time(&self, path_context: &Path) -> Result<DateTime<Utc>> {
         let metadata = fs::metadata(self.full_path(path_context)?)?;
         let mod_time = metadata.modified()?.into();
         Ok(mod_time)
     }
 
-    pub fn get_size(&self, path_context: &PathBuf) -> Result<u64> {
+    pub fn get_size(&self, path_context: &Path) -> Result<u64> {
         // use metadata() method to get file metadata and extract size
         let size = metadata(&self.full_path(path_context)?)
             .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", self.path, err))?
@@ -352,20 +354,20 @@ impl DataFile {
         Ok(size)
     }
 
-    pub fn is_alive(&self, path_context: &PathBuf) -> bool {
+    pub fn is_alive(&self, path_context: &Path) -> bool {
         path_context.join(&self.path).exists()
     }
 
 
     // Returns true if the file does not exist.
-    pub fn is_changed(&self, path_context: &PathBuf) -> Result<bool> {
+    pub fn is_changed(&self, path_context: &Path) -> Result<bool> {
         match self.get_md5(path_context)? {
             Some(new_md5) => Ok(new_md5 != self.md5),
             None => Ok(true),
         }
     }
 
-    pub fn status(&self, path_context: &PathBuf) -> Result<LocalStatusCode> {
+    pub fn status(&self, path_context: &Path) -> Result<LocalStatusCode> {
         let is_alive = self.is_alive(path_context);
         let is_changed = self.is_changed(path_context)?;
         let local_status = match (is_changed, is_alive) {
@@ -378,7 +380,7 @@ impl DataFile {
         Ok(local_status)
     }
 
-    pub fn update_md5(&mut self, path_context: &PathBuf) -> Result<()> {
+    pub fn update_md5(&mut self, path_context: &Path) -> Result<()> {
         let new_md5 = match self.get_md5(&path_context)? {
             Some(md5) => md5,
             None => return Err(anyhow!("Cannot update MD5: file does not exist")),
@@ -422,12 +424,12 @@ S: serde::ser::Serializer,
 
 /// DataCollection structure for managing the data manifest 
 /// and how it talks to the outside world.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct DataCollection {
     #[serde(serialize_with = "ordered_map")]
     pub files: HashMap<String, DataFile>,
     #[serde(serialize_with = "ordered_map")]
-    pub remotes: HashMap<String, Remote>,
+    pub remotes: HashMap<String, Remote>, // key is tracked directory
 }
 
 /// DataCollection methods: these should *only* be for 
@@ -456,7 +458,7 @@ impl DataCollection {
         Ok(())
     }
 
-    pub fn update(&mut self, filename: Option<&String>, path_context: PathBuf) -> Result<()> {
+    pub fn update(&mut self, filename: Option<&String>, path_context: &Path) -> Result<()> {
         match filename {
             Some(file) => {
                 if let Some(data_file) = self.files.get_mut(file) {
@@ -541,6 +543,7 @@ impl DataCollection {
         }
     }
 
+    // Get local DataFiles by directory
     pub fn get_files_by_directory(&self) -> Result<HashMap<String,Vec<&DataFile>>> {
         let mut dir_map: HashMap<String, Vec<&DataFile>> = HashMap::new();
         for (path, data_file) in self.files.iter() {
@@ -572,10 +575,13 @@ impl DataCollection {
     // in with the local data files (DataFile) into a MergedFile struct.
     // Missing remote/local files are None.
     pub async fn merge(&mut self, include_remotes: bool) -> Result<HashMap<String, HashMap<String, MergedFile>>> {
-        // directory -> (filename -> MergedFile)
+        // directory -> {(filename -> MergedFile), ...}
         let mut result: HashMap<String, HashMap<String, MergedFile>> = HashMap::new();
 
         // Initialize the result with local files
+        // TODO: we need to fix remote_service here, for the
+        // case where we have a local file in a tracked directory
+        // but it won't merge with a remote file later on.
         for (name, local_file) in &self.files {
             //info!("local_file: {:?}", local_file);
             let dir = local_file.directory()?;
@@ -617,10 +623,10 @@ impl DataCollection {
 
 
     // Get the status of the DataCollection, optionally with remotes.
-    pub async fn status(&mut self, path_context: &PathBuf, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
+    pub async fn status(&mut self, path_context: &Path, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
         // get all merged files, used to compute the status
         let merged_files = self.merge(include_remotes).await?;
-        println!("merged_file: {:?}", merged_files);
+        //println!("merged_file: {:?}", merged_files);
 
         let mut statuses = BTreeMap::new();
 
@@ -657,4 +663,134 @@ impl DataCollection {
         Ok(statuses)
     }
 
+    pub async fn push(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
+        // TODO before any push, we need to make sure that the project
+        // status is "clean" e.g. nothing out of data.
+
+        // Fetch all files as MergedFiles
+        // note: this authenticates
+        let all_files = self.merge(true).await?;
+
+        let mut num_uploaded = 0;
+        let mut current_skipped = Vec::new();
+        let mut messy_skipped = Vec::new();
+        let mut overwrite_skipped = Vec::new();
+        let mut untracked_skipped = Vec::new();
+        for (tracked_dir, files) in all_files.iter() {
+            if let Some(remote) = self.remotes.get(tracked_dir) {
+                for merged_file in files.values() {
+                    let name = merged_file.name()?;
+                    let path = PathBuf::from(tracked_dir).join(name).to_str().unwrap().to_string();
+                    let local = merged_file.local.clone();
+
+                    // if the file is not tracked or is remote-only, 
+                    // we do not do anything
+                    if local.as_ref().map_or(false, |mf| !mf.tracked) {
+                        untracked_skipped.push(path);
+                        continue;
+                    }
+
+                    // now we need to figure out whether to push the file, 
+                    // which depends on the RemoteStatusCode and whether
+                    // we should overwrite (TODO)
+                    let do_upload = match merged_file.status(path_context)? {
+                        RemoteStatusCode::NoLocal => {
+                            return Err(anyhow!("Internal error: execution should not have reached this point, please report."));
+                        },
+                        RemoteStatusCode::Current => {
+                            current_skipped.push(path);
+                            false
+                        },
+                        RemoteStatusCode::Exists => {
+                            // it exists on the remote, but we cannot
+                            // compare MD5s. Push only if overwrite is true.
+                            if !overwrite {
+                                overwrite_skipped.push(path);
+                            }
+                            overwrite
+                        },
+                        RemoteStatusCode::MessyLocal => {
+                            messy_skipped.push(path);
+                            false
+                        },
+                        RemoteStatusCode::Invalid => {
+                            return Err(anyhow!("A file ({:}) with RemoteStatusCode::Invalid was encountered. Please report.", path));
+                        }, 
+                        RemoteStatusCode::Different => {
+                            // TODO if remote supports modification times,
+                            // could do extra comparison here
+                            info!("skipping {:} {:}", path, overwrite);
+                            if !overwrite {
+                                overwrite_skipped.push(path);
+                            }
+                            overwrite
+                        },
+                        RemoteStatusCode::DeletedLocal => {
+                            // there is nothing to upload
+                            print_warn!("A file ({:}) was skipped because it was deleted.", path);
+                            false 
+                        },
+                        RemoteStatusCode::NotExists => true
+                    };
+
+                    if do_upload {
+                        let data_file = local.ok_or(anyhow!("Internal error (do_upload() with MergedFile.local = None): please report."))?;
+                        print_info!("uploading file '{:?}' to {:}", data_file.path, remote.name());
+                        remote.upload(&data_file, path_context).await?;
+                        num_uploaded += 1;
+                    }
+
+                }
+            }
+        }
+        println!("Uploaded {}.", pluralize(num_uploaded as u64, "file"));
+        let num_skipped = overwrite_skipped.len() + current_skipped.len() +
+                          messy_skipped.len() + untracked_skipped.len();
+        println!("Skipped {} files:", num_skipped);
+        if untracked_skipped.len() > 0 {
+            println!("  Untracked: {}", pluralize(untracked_skipped.len() as u64, "file"));
+            for path in untracked_skipped {
+                println!("   - {:}", path);
+            }
+        }
+        if current_skipped.len() > 0 {
+            println!("  Remote file is indentical to local file: {}",
+                     pluralize(current_skipped.len() as u64, "file"));
+            for path in current_skipped {
+                println!("   - {:}", path);
+            }
+        }
+        if overwrite_skipped.len() > 0 {
+            println!("  Would overwrite (use --overwrite to push): {}", 
+                     pluralize(overwrite_skipped.len() as u64, "file"));
+            for path in overwrite_skipped {
+                println!("   - {:}", path);
+            }
+        }
+        if messy_skipped.len() > 0 {
+            println!("  Local is \"messy\" (manifest and file disagree): {}",
+                     pluralize(messy_skipped.len() as u64, "file"));
+            for path in messy_skipped {
+                println!("   - {:}", path);
+            }
+        }
+ 
+        Ok(())
+    }
+
+    pub async fn pull(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
+        // TODO before any pull, we need to make sure that the project
+        // status is "clean" e.g. nothing out of data.
+        self.authenticate_remotes()?;
+
+        //let files = remote.get_files().await?;
+
+        let mut num_downloaded = 0;
+        for (dir, remote) in self.remotes.iter() {
+
+        }
+
+        println!("Downloaded {} files.", num_downloaded);
+        Ok(())
+    }
 }

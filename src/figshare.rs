@@ -1,6 +1,6 @@
 use url::Url;
 use std::fs::File;
-use std::path::{PathBuf};
+use std::path::{Path};
 use std::io::{Read,Seek,SeekFrom};
 use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
@@ -220,7 +220,7 @@ impl<'a> FigShareUpload<'a> {
     async fn upload_parts(&self, data_file: &DataFile, 
                           upload_info: &FigShareUploadInfo,
                           pending_upload_info: &FigSharePendingUploadInfo,
-                          path_context: &PathBuf) -> Result<()> {
+                          path_context: &Path) -> Result<()> {
         let full_path = path_context.join(&data_file.path);
         let url = &upload_info.upload_url;
         let mut file = File::open(full_path)?;
@@ -254,7 +254,7 @@ impl<'a> FigShareUpload<'a> {
         Ok(())
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
         let article = self.get_or_create_article_in_project(data_file).await?.clone();
         debug!("upload() article: {:?}", article);
         let (upload_info, pending_upload_info) = self.init_upload(data_file, &article).await?;
@@ -362,13 +362,13 @@ impl FigShareAPI {
             }
         }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
         let this_upload = FigShareUpload::new(self);
         this_upload.upload(data_file, path_context).await?;
         Ok(())
     }
 
-    pub async fn download(&self, data_file: &DataFile, path_context: &PathBuf,
+    pub async fn download(&self, data_file: &DataFile, path_context: &Path,
                           overwrite: bool) -> Result<()>{
         if data_file.is_alive(path_context) && !overwrite {
             return Err(anyhow!("Data file '{}' exists locally, and would be \
@@ -491,11 +491,6 @@ impl FigShareAPI {
         let remote_files = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
-
-    /// Given a list of local files, find them on the remote and download them
-    /// all.
-    //pub async fn download(&self, data_files: Vec<DataFile>) {
-    //}
 
     // This returns the unique FigShareArticles
     // Warning: There can be clashing here!
