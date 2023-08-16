@@ -9,8 +9,8 @@ use colored::Colorize;
 
 use crate::{print_warn,print_info};
 use crate::data::{DataFile,DataCollection};
-use crate::utils::{load_file,print_status};
-use crate::remote::{AuthKeys,authenticate_remote};
+use crate::utils::{load_file,print_status, print_fixed_width_status};
+use crate::remote::{AuthKeys,authenticate_remote,RemoteStatusCode};
 use crate::remote::Remote;
 use crate::figshare::FigShareAPI;
 use crate::data::{StatusEntry,LocalStatusCode};
@@ -143,41 +143,33 @@ impl Project {
     pub async fn status(&mut self, include_remotes: bool) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.
-        let remotes = if include_remotes {
-            self.data.authenticate_remotes()?;
-            Some(&self.data.remotes)
-        } else {
-            None
-        };
-
         let abbrev = Some(8);
-        let mut rows: Vec<StatusEntry> = Vec::new();
-        for value in self.data.files.values() {
-            let entry = value.status_info(&self.path_context(), remotes, abbrev).await?;
-            rows.push(entry);
-        }
-        print_status(rows, Some(&self.data.remotes));
+        let path_context = &canonicalize(self.path_context())?;
+        let status_rows = self.data.status(path_context, include_remotes).await?;
+        print_fixed_width_status(status_rows, None, None, true);
         Ok(())
     }
 
     pub fn is_clean(&self) -> Result<bool> {
         for data_file in self.data.files.values() {
             let status = data_file.status(&self.path_context())?;
-            if status.local_status != LocalStatusCode::Current {
+            if status != LocalStatusCode::Current {
                 return Ok(false);
             }
         }
         Ok(true)
     }
-
+/*
     pub fn stats(&self) -> Result<()> {
         let mut rows: Vec<StatusEntry> = Vec::new();
         for (key, data_file) in self.data.files.iter() {
             let size = format_bytes(data_file.get_size(&self.path_context())?);
             let cols = vec![key.clone(), size];
+            // TODO use different more general struct?
+            // Or print_fixed_width should be a trait?
             let entry = StatusEntry {
                 local_status: LocalStatusCode::Invalid, 
-                remote_status: None,
+                remote_status: RemoteStatusCode::NotExists,
                 tracked: Some(false),
                 remote_service: None,
                 cols: Some(cols) };
@@ -185,7 +177,7 @@ impl Project {
         }
         print_status(rows, None);
         Ok(())
-    }
+    } */
 
 
     pub fn add(&mut self, files: &Vec<String>) -> Result<()> {
@@ -241,9 +233,9 @@ impl Project {
     }
 
     pub async fn ls(&mut self) -> Result<()> {
-        let all_remote_files = self.data.merge().await?;
-        for (remote, remote_files) in all_remote_files.iter() {
-            println!("Remote: {}", remote);
+        let all_remote_files = self.data.merge(true).await?;
+        for (directory, remote_files) in all_remote_files.iter() {
+            println!("Remote: {}", directory);
             for file in remote_files.values() {
                 println!(" - {:?}", file);
             }

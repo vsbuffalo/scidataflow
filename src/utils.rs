@@ -66,7 +66,7 @@ pub fn compute_md5(file_path: &Path) -> Result<Option<String>> {
     let result = md5.compute();
     Ok(Some(format!("{:x}", result)))
 }
-
+/*
 pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
@@ -119,120 +119,98 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
         println!();
     }
 }
-
+ */
 // More specialized version of print_fixed_width() for statuses.
 // Handles coloring, manual annotation, etc 
 pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
 
+    let abbrev = Some(8);
+
+    // get the max number of columns (in case ragged) 
     let max_cols = rows.values()
         .flat_map(|v| v.iter())
-        .filter_map(|entry| {
-            match &entry.cols {
-                None => None,
-                Some(cols) => Some(cols.len())
-            }
-        })
+        .filter_map(|entry| entry.columns(abbrev).ok().map(|cols| cols.len()))
         .max()
         .unwrap_or(0);
 
-        let mut max_lengths = vec![0; max_cols];
+    let mut max_lengths = vec![0; max_cols];
 
-        // compute max lengths across all rows
-        for row in rows.values().flat_map(|v| v.iter()) {
-            if let Some(cols) = &row.cols {
-                for (i, col) in cols.iter().enumerate() {
-                    max_lengths[i] = max_lengths[i].max(col.width());
-                }
-            }
-        }
-
-        // print status table
-        let mut keys: Vec<&String> = rows.keys().collect();
-        keys.sort();
-        for (key, value) in &rows {
-            let pretty_key = if color { key.bold().to_string() } else { key.clone() };
-            println!("[{}]", pretty_key);
-
-            // Print the rows with the correct widths
-            for row in value {
-                let mut fixed_row = Vec::new();
-                let tracked = &row.tracked;
-                let local_status = &row.local_status;
-                let remote_status = &row.remote_status;
-                if let Some(cols) = &row.cols {
-                    for (i, col) in cols.iter().enumerate() {
-                        // push a fixed-width column to vector
-                        let spacer = if i == 0 { " " } else { "" };
-                        let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
-                        fixed_row.push(fixed_col);
-                    }
-                }
-                let spacer = " ".repeat(nspaces);
-
-                // color row
-                let status_line = fixed_row.join(&spacer);
-                let status_line = match (tracked, local_status, remote_status) {
-                    (Some(true), LocalStatusCode::Current, Some(RemoteStatusCode::Current)) => status_line.green().to_string(),
-                    (Some(true), LocalStatusCode::Current, None) => status_line.green().to_string(),
-                    // not tracked, but on remote
-                    (Some(false), LocalStatusCode::Current, Some(RemoteStatusCode::Current)) => status_line.cyan().to_string(),
-                    // not tracked, not on remote
-                    (Some(false), LocalStatusCode::Current, None) => status_line.yellow().to_string(),
-                    (Some(false), LocalStatusCode::Current, Some(RemoteStatusCode::NotExists)) => status_line.yellow().to_string(),
-                    (None, LocalStatusCode::Current, None) => status_line.green().to_string(),
-
-                    (Some(true), LocalStatusCode::Modified, _)  => status_line.red().to_string(),
-                    (Some(false), LocalStatusCode::Modified, _)  => status_line.red().to_string(),
-                    (Some(true), LocalStatusCode::Current, Some(RemoteStatusCode::NotExists))  => status_line.yellow().to_string(),
-                    (Some(true), LocalStatusCode::Current, Some(RemoteStatusCode::MD5Mismatch))  => status_line.yellow().to_string(),
-                    (Some(false), LocalStatusCode::Current, _)  => status_line.green().to_string(),
-                    _ => status_line.cyan().to_string()
-                };
-                println!("{}{}", " ".repeat(indent), status_line);
-            }
-            println!();
-        }
-}
-
-fn organize_by_dir(rows: Vec<StatusEntry>) -> BTreeMap<String, Vec<StatusEntry>> {
-    let mut dir_map: BTreeMap<String, Vec<StatusEntry>> = BTreeMap::new();
-
-    for entry in rows {
-        if let Some(cols) = &entry.cols {
-            if let Some(first_elem) = cols.first() {
-                let path = Path::new(first_elem);
-                if let Some(parent_path) = path.parent() {
-                    let parent_dir = parent_path.to_string_lossy().into_owned();
-                    dir_map.entry(parent_dir).or_default().push(entry);
-                }
+    // compute max lengths across all rows
+    for status in rows.values().flat_map(|v| v.iter()) {
+        if let Ok(cols) = status.columns(abbrev) { // Assuming columns returns Result<Vec<String>>
+            for (i, col) in cols.iter().enumerate() {
+                max_lengths[i] = max_lengths[i].max(col.len()); // Assuming col is a string
             }
         }
     }
-    dir_map
+
+    // print status table
+    let mut keys: Vec<&String> = rows.keys().collect();
+    keys.sort();
+    for (key, value) in &rows {
+        let pretty_key = if color { key.bold().to_string() } else { key.clone() };
+        println!("[{}]", pretty_key);
+
+        // Print the rows with the correct widths
+        for status in value {
+            if let Ok(cols) = status.columns(abbrev) {
+                let mut fixed_row = Vec::new();
+                for (i, col) in cols.iter().enumerate() {
+                    // push a fixed-width column to vector
+                    let spacer = if i == 0 { " " } else { "" };
+                    let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
+                    fixed_row.push(fixed_col);
+                }
+                let spacer = " ".repeat(nspaces);
+                let line = fixed_row.join(&spacer);
+                let status_line = if color { status.color(line) } else { line.to_string() };
+                println!("{}{}", " ".repeat(indent), status_line);
+            }
+        }
+        println!();
+    }
 }
 
-pub fn print_status(rows: Vec<StatusEntry>, remote: Option<&HashMap<String,Remote>>) {
+/* fn organize_by_dir(rows: Vec<StatusEntry>) -> BTreeMap<String, Vec<StatusEntry>> {
+   let mut dir_map: BTreeMap<String, Vec<StatusEntry>> = BTreeMap::new();
+
+   for entry in rows {
+   if let Some(cols) = &entry.cols {
+   if let Some(first_elem) = cols.first() {
+   let path = Path::new(first_elem);
+   if let Some(parent_path) = path.parent() {
+   let parent_dir = parent_path.to_string_lossy().into_owned();
+   dir_map.entry(parent_dir).or_default().push(entry);
+   }
+   }
+   }
+   }
+   dir_map
+   }
+   */
+
+pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>) {
     println!("{}", "Project data status:".bold());
     println!("{} data file{} registered.\n", rows.len(), if rows.len() > 1 {"s"} else {""});
 
-    let organized_rows = organize_by_dir(rows);
-
+    // this brings the remote name (if there is a corresponding remote) into 
+    // the key, so the linked remote can be displayed in the status 
     let rows_by_dir: BTreeMap<String, Vec<StatusEntry>> = match remote {
         Some(remote_map) => {
             let mut new_map = BTreeMap::new();
-            for (key, value) in organized_rows {
-                if let Some(remote) = remote_map.get(&key) {
-                    let new_key = format!("{} > {}", key, remote.name());
-                    new_map.insert(new_key, value);
+            for (directory, statuses) in rows {
+                if let Some(remote) = remote_map.get(&directory) {
+                    let new_key = format!("{} > {}", directory, remote.name());
+                    new_map.insert(new_key, statuses);
                 } else {
-                    new_map.insert(key, value);
+                    new_map.insert(directory, statuses);
                 }
             }
             new_map
         },
-        None => organized_rows,
+        None => rows,
     };
 
     print_fixed_width_status(rows_by_dir, None, None, true);
@@ -275,3 +253,23 @@ pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     let timestamp = local_time.format("%Y-%m-%d %l:%M%p").to_string();
     format!("{} ({})", timestamp, formatter.convert(std_duration))
 }
+
+fn shorten(hash: &String, abbrev: Option<i32>) -> String {
+    let n = abbrev.unwrap_or(hash.len() as i32) as usize;
+    hash.chars().take(n).collect()
+}
+
+pub fn md5_status(new_md5: Option<&String>, old_md5: Option<&String>, abbrev: Option<i32>) -> String {
+    match (new_md5, old_md5) {
+        (Some(new), Some(old)) => {
+            if new == old {
+                format!("{}", shorten(&new, abbrev))
+            } else {
+                format!("{} → {}", shorten(&old, abbrev), shorten(&new, abbrev))
+            }
+        },
+        (None, Some(old)) => format!("{}", shorten(&old, abbrev)),
+        _ => "".to_string(),
+    }
+}
+

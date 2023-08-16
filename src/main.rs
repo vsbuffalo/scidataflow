@@ -131,7 +131,7 @@ enum Commands {
         #[structopt(long)]
         overwrite: bool,
 
-        // Multiple optional directories
+        // multiple optional directories
         directories: Vec<PathBuf>,
     },
 
@@ -173,7 +173,8 @@ async fn run() -> Result<()> {
         }
         Some(Commands::Stats {  }) => {
             let proj = Project::new()?;
-            proj.stats()
+            //proj.stats()
+            Ok(())
         }
         Some(Commands::Update { filename }) => {
             let mut proj = Project::new()?;

@@ -270,7 +270,7 @@ impl From<FigShareArticle> for RemoteFile {
             name: fgsh.title,
             md5: fgsh.md5,
             size: fgsh.size,
-            remote_id: Some(format!("{}", fgsh.id)),
+            remote_service: "FigShare".to_string()
         }
     }
 }

@@ -18,21 +18,42 @@ use crate::dryad::{DataDryadAPI};
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
 
-#[derive(PartialEq,Clone)]
-pub enum RemoteStatusCode {
-   NotExists,
-   Current,
-   MD5Mismatch,
-   NoMD5,
-   Invalid
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteFile {
     pub name: String,
     pub md5: Option<String>,
     pub size: Option<u64>,
-    pub remote_id: Option<String>
+    pub remote_service: String
+}
+
+
+// This is the status of the local state with the remote state.
+// There are huge number of combinations between tracked, untracked
+// local files, and whether the manifest and file MD5s agree or 
+// disagree (a "messy" state). However, it's better to handle few
+// cases well, and error out.
+//
+// Note that these states are independent of whether something is
+// tracked. Tracking only indicates whether the next pull/push 
+// should sync the file (if tracked). Tracked files are *always* 
+// in the manifest (since that is where that state is stored).
+//
+// NoLocal files will *not* be sync'd, since they are no in the 
+// manifest, and sciflow will only get pull/push things in the 
+// manifest.
+//
+// Clean state: everything on the manifest tracked by the remote is
+// local, with nothing else.
+#[derive(PartialEq,Clone)]
+pub enum RemoteStatusCode {
+    Current,              // local and remote files are identical
+    MessyLocal,           // local file is different than remote and manifest, which agree
+    Different,            // the local file is current, but different than the remote
+    NotExists,            // no remote file
+    Exists,               // remote file exists, but remote does not support MD5s
+    NoLocal,              // a file on the remote, but not in manifest or found locally
+    //OutsideSource,        // a file on the remote, but not in manifest but *is* found locally
+    Invalid
 }
 
 impl RemoteFile {
@@ -165,49 +186,7 @@ impl Remote {
     //    }
     //}
 
-    pub async fn file_status(&self, data_file: &DataFile, path_context: &PathBuf) -> Result<(String, RemoteStatusCode)> {
-        if !data_file.is_alive(path_context) {
-            return Err(anyhow!("Data file '{}' no longer exists!", data_file.path));
-        }
-        let path = data_file.full_path(path_context)?;
-        let file_name = path.file_name()
-            .ok_or(anyhow!("Invalid path: {:?}", path))?
-            .to_string_lossy()
-            .to_string();
 
-        let remote_files = self.get_files().await?;
-        let service = self.name().to_string();
-
-        // Check if the DataFile is clean
-        if data_file.tracked && data_file.status(path_context)?.local_status != LocalStatusCode::Current {
-            // Not comparing as it's "unclean"
-            return Err(anyhow!("The data file '{}' is tracked by a remote and \
-                               has changed locally; its MD5 hash in the data \
-                               manifest differs from its true MD5.\nPlease run: \
-                               swf update.", data_file.path));
-        }
-
-        // Do we have a remote file that matches this DataFile's name?
-        if let Some(remote_file) = remote_files.iter().find(|f| f.name == file_name) {
-            // Let's now compare MD5s
-            if let Some(remote_md5) = &remote_file.md5 {
-                if let Ok(Some(local_md5)) = data_file.get_md5(&path_context) {
-                    if local_md5 == *remote_md5 {
-                        Ok((service, RemoteStatusCode::Current))
-                    } else {
-                        Ok((service, RemoteStatusCode::MD5Mismatch))
-                    }
-                } else {
-                    return Err(anyhow!("Cannot get MD5 of data file '{}'. Is it tracked?", data_file.path))
-                }
-            } else {
-                Ok((service, RemoteStatusCode::NoMD5))
-            }
-        } else {
-            Ok((service, RemoteStatusCode::NotExists))
-        }
-
-    }
 }
 
 pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {

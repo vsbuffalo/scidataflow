@@ -7,29 +7,110 @@ use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use chrono::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap,HashSet,BTreeMap};
+use futures::future::join_all;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use std::fs;
+use colored::*;
 
 use crate::traits::Status;
+use crate::utils::{format_mod_time,compute_md5, md5_status};
+use crate::remote::{authenticate_remote,Remote,RemoteFile,RemoteStatusCode};
 
-use super::utils::{format_mod_time,compute_md5};
-use super::remote::{authenticate_remote,Remote,RemoteStatusCode,RemoteFile};
-
+// The status of a local data file, *conditioned* on it being in the manifest.
 #[derive(PartialEq,Clone)]
 pub enum LocalStatusCode {
-   Current,
-   Modified,
-   Deleted,
-   Invalid
+    Current,     // The MD5s between the file and manifest agree
+    Modified,    // The MD5s disagree
+    Deleted,     // The file is in the manifest but not file system
+    Invalid      // Invalid state
 }
 
 #[derive(Clone)]
 pub struct StatusEntry {
-    pub local_status: LocalStatusCode,
+    pub name: String,
+    pub local_status: Option<LocalStatusCode>,
     pub remote_status: Option<RemoteStatusCode>,
-    pub tracked: Option<bool>, // None indicates that no remote 
-    pub cols: Option<Vec<String>>,
-    pub remote_service: Option<String>
+    pub tracked: Option<bool>,
+    pub remote_service: Option<String>,
+    pub local_md5: Option<String>,
+    pub remote_md5: Option<String>,
+    pub manifest_md5: Option<String>,
+    pub local_mod_time: Option<DateTime<Utc>>
+}
+
+impl StatusEntry {
+    fn local_md5_column(&self, abbrev: Option<i32>) -> Result<String> {
+        Ok(md5_status(self.local_md5.as_ref(), self.manifest_md5.as_ref(), abbrev))
+    }
+    fn remote_md5_column(&self, abbrev: Option<i32>) -> Result<String> {
+        Ok(md5_status(self.remote_md5.as_ref(), self.manifest_md5.as_ref(), abbrev))
+    }
+    fn include_remotes(&self) -> bool {
+        self.remote_status.is_some()
+    }
+    pub fn color(&self, line: String) -> String {
+        let tracked = self.tracked;
+        let local_status = &self.local_status;
+        let remote_status = &self.remote_status;
+        let line = match (tracked, local_status, remote_status) {
+            (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Current)) => line.green().to_string(),
+            (Some(true), Some(LocalStatusCode::Current), None) => line.green().to_string(),
+            // not tracked, but on remote
+            (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Current)) => line.cyan().to_string(),
+            // not tracked, not on remote
+            (Some(false), Some(LocalStatusCode::Current), None) => line.yellow().to_string(),
+            (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists)) => line.yellow().to_string(),
+            (None, Some(LocalStatusCode::Current), None) => line.green().to_string(),
+
+            (Some(true), Some(LocalStatusCode::Modified), _)  => line.red().to_string(),
+            (Some(false), Some(LocalStatusCode::Modified), _)  => line.red().to_string(),
+            (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists))  => line.yellow().to_string(),
+            (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Different))  => line.yellow().to_string(),
+            (Some(false), Some(LocalStatusCode::Current), _)  => line.green().to_string(),
+            _ => line.cyan().to_string()
+        };
+        line
+    }
+    pub fn columns(&self, abbrev: Option<i32>) -> Result<Vec<String>> {
+        let local_status = &self.local_status;
+
+        let md5_string = self.local_md5_column(abbrev)?;
+
+        let mod_time_pretty = self.local_mod_time.map(format_mod_time).unwrap_or_default();
+
+        // append a local status message column
+        let local_status_msg = match local_status {
+            Some(LocalStatusCode::Current) => "current",
+            Some(LocalStatusCode::Modified) => "changed",
+            Some(LocalStatusCode::Deleted) => "deleted",
+            Some(LocalStatusCode::Invalid) => "invalid",
+            _ => "no file"
+        };
+
+        let mut columns = vec![
+            self.name.clone(),
+            local_status_msg.to_string(),
+            md5_string,
+            mod_time_pretty,
+        ];
+
+        if self.include_remotes() {
+            let remote_status_msg = match &self.remote_status {
+                Some(RemoteStatusCode::Current) => "current",
+                Some(RemoteStatusCode::MessyLocal) => "messy local",
+                Some(RemoteStatusCode::Different) => "different",
+                Some(RemoteStatusCode::NotExists) => "not on remote",
+                Some(RemoteStatusCode::NoLocal) => "unknown (messy remote)",
+                Some(RemoteStatusCode::Exists) => "  ???  ",
+                _ => "invalid"
+            };
+            columns.push(remote_status_msg.to_string());
+        }
+
+        Ok(columns)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,15 +129,138 @@ pub struct MergedFile {
     pub remote: Option<RemoteFile>
 }
 
+
 impl MergedFile {
     pub fn merge(data_file: &DataFile, remote_file: &RemoteFile) -> Result<MergedFile> {
-        if data_file.basename()? != remote_file.name {
-            return Err(anyhow!("Mismatch between local and remote file names"));
-        }
-
         Ok(MergedFile {
             local: Some(data_file.clone()),
             remote: Some(remote_file.clone())
+        })
+    }
+
+    pub fn name(&self) -> Result<String> {
+        match (&self.local, &self.remote) {
+            (Some(local), Some(remote)) => {
+                let local_name = local.basename()?;
+                if local_name == remote.name {
+                    Ok(local_name)
+                } else {
+                    Err(anyhow!("Local and remote names do not match."))
+                }
+            },
+            (Some(local), None) => Ok(local.basename()?),
+            (None, Some(remote)) => Ok(remote.name.clone()),
+            (None, None) => Err(anyhow!("Invalid state: both local and remote are None.")),
+        }
+    }
+
+    pub fn has_remote(&self) -> Result<bool> {
+        Ok(!self.remote.is_none())
+    }
+
+    pub fn is_tracked(&self) -> Option<bool> {
+        self.local.as_ref().map(|data_file| data_file.tracked)
+    }
+
+    pub fn local_md5(&self, path_context: &PathBuf) -> Option<String> {
+        self.local.as_ref()
+            .and_then(|local| local.get_md5(path_context).ok())
+            .flatten()
+    }
+
+    pub fn remote_md5(&self) -> Option<String> {
+        self.remote.as_ref()
+            .and_then(|remote| remote.get_md5())
+    }
+
+    //pub fn local_md5_mismatch(&self, path_context: &PathBuf) -> Option<bool> {
+    //}
+
+    pub fn manifest_md5(&self) -> Option<String> {
+        self.local.as_ref().map(|local| local.md5.clone())
+    }
+
+    pub fn local_remote_md5_mismatch(&self, path_context: &PathBuf) -> Option<bool> {
+        let local_md5 = self.local_md5(path_context);
+        let remote_md5 = self.remote_md5();
+        match (remote_md5, local_md5) {
+            (Some(remote), Some(local)) => Some(remote != local),
+            _ => None,
+        }
+    }
+
+    pub fn local_mod_time(&self, path_context: &PathBuf) -> Option<DateTime<Utc>> {
+        self.local.as_ref()
+            .and_then(|data_file| data_file
+                      .get_mod_time(path_context).ok())
+    }
+
+    pub fn status(&self, path_context: &PathBuf) -> Result<RemoteStatusCode> {
+        //let tracked = self.local.as_ref().map_or(None,|df| Some(df.tracked));
+
+        // local status, None if no local file found
+        let local_status = self.local
+            .as_ref()
+            .map_or(None, |local| local.status(path_context).ok());
+
+        let md5_mismatch = self.local_remote_md5_mismatch(path_context);
+    
+        if !self.has_remote().unwrap_or(false) {
+            return Ok(RemoteStatusCode::NotExists)
+        }
+
+        let status = match (&local_status, &md5_mismatch) {
+            (Some(LocalStatusCode::Current), Some(true)) => {
+                RemoteStatusCode::Current
+            },
+            (Some(LocalStatusCode::Current), Some(false)) => {
+                // Will pull with --overwrite. 
+                // Will push with --overwrite.
+                RemoteStatusCode::Different
+            },
+            (Some(LocalStatusCode::Current), None) => {
+                // We can't compare the MD5s, i.e. because remote 
+                // does not support them
+                RemoteStatusCode::Exists
+            },
+            (Some(LocalStatusCode::Modified), _) => {
+                // Messy local -- this will prevent syncing!
+                RemoteStatusCode::MessyLocal
+            },
+            (Some(LocalStatusCode::Deleted), _) => {
+                // Local file on file system does not exist,
+                // but exists in the manifest. If the file is in 
+                // the manifest and tracked a pull would pull it in.
+                RemoteStatusCode::NoLocal
+            },
+            (_, _) => RemoteStatusCode::Invalid
+        };
+
+        Ok(status)
+    }
+
+    pub async fn status_entry(&self, path_context: &PathBuf) -> Result<StatusEntry> {
+        let tracked = self.local.as_ref().map_or(None,|df| Some(df.tracked));
+        let local_status = self.local
+            .as_ref()
+            .map_or(None, |local| local.status(path_context).ok());
+
+        let remote_status = self.status(path_context)?;
+
+        if self.local.is_none() && self.remote.is_none() {
+            return Err(anyhow!("Internal error: MergedFile with no RemoteFile and DataFile set. Please report."));
+        }
+
+        Ok(StatusEntry {
+            name: self.name()?,
+            local_status,
+            remote_status: Some(remote_status),
+            tracked,
+            remote_service: None,
+            local_md5: self.local_md5(path_context),
+            remote_md5: self.remote_md5(),
+            manifest_md5: self.manifest_md5(),
+            local_mod_time: self.local_mod_time(path_context)
         })
     }
 }
@@ -95,10 +299,10 @@ impl DataFile {
     pub fn directory(&self) -> Result<String> {
         let path = std::path::Path::new(&self.path);
         Ok(path.parent()
-            .unwrap_or_else(|| path)
-            .to_str()
-            .unwrap_or("")
-            .to_string())
+           .unwrap_or_else(|| path)
+           .to_str()
+           .unwrap_or("")
+           .to_string())
     }
 
     pub fn get_md5(&self, path_context: &PathBuf) -> Result<Option<String>> {
@@ -123,6 +327,8 @@ impl DataFile {
         path_context.join(&self.path).exists()
     }
 
+
+    // Returns true if the file does not exist.
     pub fn is_changed(&self, path_context: &PathBuf) -> Result<bool> {
         match self.get_md5(path_context)? {
             Some(new_md5) => Ok(new_md5 != self.md5),
@@ -130,66 +336,17 @@ impl DataFile {
         }
     }
 
-    pub fn status(&self, path_context: &PathBuf) -> Result<StatusEntry> {
+    pub fn status(&self, path_context: &PathBuf) -> Result<LocalStatusCode> {
         let is_alive = self.is_alive(path_context);
         let is_changed = self.is_changed(path_context)?;
         let local_status = match (is_changed, is_alive) {
             (false, true) => LocalStatusCode::Current,
             (true, true) => LocalStatusCode::Modified,
-            (false, false) => LocalStatusCode::Deleted,
+            (false, false) => LocalStatusCode::Deleted,  // Invalid? (TODO)
+            (true, false) => LocalStatusCode::Deleted,
             _ => LocalStatusCode::Invalid,
         };
-        Ok(StatusEntry { 
-            local_status,
-            remote_status: None,
-            tracked: None,
-            remote_service: None,
-            cols: None
-        }) 
-    }
-    // Do a merge on paths, and fold in remote status.
-    // Merge is left join, where there will be some files on remote 
-    // that are not DataFiles -- DataFiles must represent a fixed file 
-    // that is *tracked* in the manifest. 
-    pub async fn status_with_remotes(&self, path_context: &PathBuf, remotes: Option<&HashMap<String,Remote>>) -> Result<StatusEntry> {
-        let mut status_entry = self.status(&path_context)?;
-
-        let mut found_remote_files: Vec<(String, RemoteStatusCode)> = Vec::new();
-        let mut remote_names: HashMap<String, Vec<String>> = HashMap::new();
-
-        if let Some(remotes_map) = remotes {
-            // iterate through all remotes, looking for one that contains this DataFile.
-            for (path, remote) in remotes_map.iter() {
-                let remote_status = remote.file_status(&self, &path_context).await?;
-                let (file_name, _) = &remote_status;
-
-                found_remote_files.push(remote_status.clone());
-
-                // collect the names of the remotes where each file was found.
-                remote_names.entry(file_name.clone()).or_default().push(remote.name().to_string());
-            }
-
-            // raise error if the file is tracked by multiple remotes
-            for (file_name, remote_list) in remote_names.iter() {
-                if remote_list.len() > 1 {
-                    return Err(anyhow!("File '{}' is tracked in multiple remotes: {:?}", file_name, remote_list));
-                }
-            }
-
-            // extract out the singular remote status code and assign
-            if let Some((service, remote_status_code)) = found_remote_files.first() {
-                status_entry.remote_status = Some(remote_status_code.clone());
-                status_entry.remote_service = Some(service.clone());
-                status_entry.tracked = Some(self.tracked);
-            }
-        } else {
-            // No remotes given.
-            status_entry.remote_status = None;
-            status_entry.remote_service = None;
-            status_entry.tracked = None;
-        }
-
-        Ok(status_entry)
+        Ok(local_status)
     }
 
     pub fn update_md5(&mut self, path_context: &PathBuf) -> Result<()> {
@@ -216,73 +373,6 @@ impl DataFile {
         self.tracked = false;
         Ok(())
     }
-
-    pub async fn status_info(&self, path_context: &PathBuf, remotes: Option<&HashMap<String,Remote>>, n: Option<i32>) -> Result<StatusEntry> {
-        //let is_updated = self.is_updated(path_context);
-        let new_md5 = self.get_md5(path_context)?;
-        let old_md5 = &self.md5;
-        let mod_time = self.get_mod_time(path_context)?;
-        let status = self.status_with_remotes(path_context, remotes).await?;
-        let local_status = status.local_status;
-        let remote_status = if remotes.is_some() { status.remote_status } else { None };
-        let remote_service = if remotes.is_some() { status.remote_service } else { None };
-
-        let md5_string = match local_status {
-            LocalStatusCode::Current => format!("{}", shorten(&old_md5, n)),
-            LocalStatusCode::Modified => {
-                match new_md5 {
-                    Some(new_md5) => format!("{} → {}", shorten(&old_md5, n), shorten(&new_md5, n)),
-                    None => return Err(anyhow!("Error: new MD5 not available")),
-                }
-            },
-            _ => "".to_string(),
-        };
-
-        let mod_time_pretty = format_mod_time(mod_time);
-
-        // append a local status message column
-        let local_status_msg = match local_status {
-            LocalStatusCode::Current => "current",
-            LocalStatusCode::Modified => "changed",
-            LocalStatusCode::Deleted => "deleted",
-            LocalStatusCode::Invalid => "invalid",
-        };
-
-        let mut columns = vec![
-            self.path.clone(),
-            local_status_msg.to_string(),
-            md5_string,
-            mod_time_pretty,
-        ];
-
-        // if we have a remote status (e.g. we talked to remotes)
-        // we add a column
-        if let Some(status) = &remote_status {
-            let remote_status_msg = match status {
-                RemoteStatusCode::NotExists => "not on remote",
-                RemoteStatusCode::Current => "current",
-                RemoteStatusCode::MD5Mismatch => "remote has different version",
-                RemoteStatusCode::NoMD5 => "no MD5 on remote",
-                RemoteStatusCode::Invalid => "invalid",
-            };
-            let tracking_status = if self.tracked { "" } else { "not tracked" };
-            let remote_status_msg = if self.tracked { remote_status_msg } else {""};
-            columns.push(format!("{}{}", tracking_status, remote_status_msg));
-        }
-
-        Ok(StatusEntry {
-            local_status: local_status.clone(),
-            remote_status: remote_status.clone(),
-            tracked: Some(self.tracked),
-            remote_service,
-            cols: Some(columns),
-        })
-    }
-}
-
-fn shorten(hash: &String, abbrev: Option<i32>) -> String {
-    let n = abbrev.unwrap_or(hash.len() as i32) as usize;
-    hash.chars().take(n).collect()
 }
 
 fn ordered_map<K, V, S>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
@@ -445,8 +535,11 @@ impl DataCollection {
         Ok(all_remote_files)
     }
 
-
-    pub async fn merge(&mut self) -> Result<HashMap<String, HashMap<String, MergedFile>>> {
+    // Use a fetch to get all remote files (as RemoteFile), and merge these 
+    // in with the local data files (DataFile) into a MergedFile struct.
+    // Missing remote/local files are None.
+    pub async fn merge(&mut self, include_remotes: bool) -> Result<HashMap<String, HashMap<String, MergedFile>>> {
+        // directory -> (filename -> MergedFile)
         let mut result: HashMap<String, HashMap<String, MergedFile>> = HashMap::new();
 
         // Initialize the result with local files
@@ -457,6 +550,10 @@ impl DataCollection {
                 MergedFile { local: Some(local_file.clone()), remote: None });
         }
 
+        if !include_remotes {
+            return Ok(result)
+        }
+
         // iterate through each remote and retrieve remote files
         let all_remote_files = self.fetch().await?;
         for (tracked_dir, remote_files) in all_remote_files.iter() {
@@ -465,15 +562,54 @@ impl DataCollection {
                 // try to get the tracked directory; it doesn't exist make it
                 if let Some(merged_file) = result.entry(tracked_dir.clone())
                     .or_insert_with(HashMap::new).get_mut(name) {
-                    merged_file.remote = Some(remote_file.clone());
-                } else {
-                    result.entry(tracked_dir.clone()).or_insert_with(HashMap::new).insert(name.to_string(), MergedFile { local: None, remote: Some(remote_file.clone()) });
-                }
+                        // 
+                        merged_file.remote = Some(remote_file.clone());
+                    } else {
+                        result.entry(tracked_dir.clone()).or_insert_with(HashMap::new).insert(name.to_string(), MergedFile { local: None, remote: Some(remote_file.clone()) });
+                    }
             }
         }
         Ok(result)
     }
 
+    pub async fn status(&mut self, path_context: &PathBuf, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
+        // get all merged files, used to compute the status
+        let merged_files = self.merge(include_remotes).await?;
+
+        let mut statuses = BTreeMap::new();
+
+        // Get the StatusEntry async via join_all() for each 
+        // MergedFile. The inner hash map has keys that are the 
+        // file names (since this was use for join); these are not 
+        // needed so they're ditched, leaving a 
+        // BTreeMap<Vec<StatusEntry>>
+        let statuses_futures: FuturesUnordered<_> = merged_files
+            .into_iter()
+            .map(|(outer_key, inner_map)| {
+                // create a future for each merged_file, and collect the results
+                async move {
+                    let status_entries: Result<Vec<_>, _> = join_all(
+                        inner_map.values()
+                        // get the StatusEntry for each MergedFile
+                        .map(|mf| async { mf.status_entry(path_context).await })
+                        .collect::<Vec<_>>()
+                        ).await.into_iter().collect();
+                    status_entries.map(|entries| (outer_key, entries))
+                }
+            })
+        .collect();
+
+        let statuses_results: Vec<_> = statuses_futures.collect().await;
+
+        for result in statuses_results {
+            if let Ok((key, value)) = result {
+                statuses.insert(key, value);
+            } else {
+                // Handle the error as needed
+            }
+        }
+
+        Ok(statuses)
+    }
+
 }
-
-

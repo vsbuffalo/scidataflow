@@ -3,6 +3,20 @@
 There is a fundamental other valuable asset in modern science other than that
 paper. It is a reproducible, reusable set of project data.
 
+SciFlow uses a fairly permissive project structure. However, it must 
+work around one key issue: most remote data stores do not supported
+nested hierarchy. Of course, one could just archive and zip a complex 
+data directory (and in some cases, that is the only option). However,
+keeping this updated is a pain, and it archive files (like `.tar.gz`)
+obscure the data files they contain, making it difficult to track
+them and their changes.
+
+SciFlow gets around this by allowing data to be in any directory below the
+project root directory (the directory containing `data_manifest.yml`, and
+likely `.git/`). However, t
+
+
+
 Science has several problems, and I think the most severe of which is that
 manuscripts have extremely limited value in terms of our long-term
 understanding of complex phenomenon. Science needs to build of previous work
@@ -19,7 +33,7 @@ anywhere with the commands:
     cd research_project/
     scf status
 
-    sci pull  # pull in all the project data.
+    scf pull  # pull in all the project data.
 
 
 ## Supported Remotes
@@ -28,6 +42,35 @@ anywhere with the commands:
  - [ ] Data Dryad
  - [ ] Zenodo
  - [ ] static remotes (i.e. just URLs)
+
+## TODO 
+
+ - we need to be more strict about whether the remotes have files that 
+   are listed as tracked in *subdirectories*. E.g. we should, when a 
+   link to a remote is added to track a directory, check that that
+   directory does not have files in the manifest that are are in 
+   subdirectories.
+
+## Operation
+
+Digest states:
+
+ - local file system
+ - local manifest
+ - remote supports MD5 
+ - remote does not supports MD5 
+
+1. Pulling in remote files.
+
+2. Pushing local files to a remote.
+
+3. Clobbered local data. A more complex case; local data is "messy", e.g. local
+   files and manifest disagree. 
+
+
+
+
+
 
 ## Design
 
@@ -41,7 +84,37 @@ with the path tracked by the remote as keys, and a `Remote` `enum` for the
 values. Each `Remote` `enum` corresponds to one of the supported remotes.
 
 The `Remote` `enum` has methods that are meant as a generic interface for *any*
-remote. Most core logic should live here.
+remote. Most core logic should live here. Furthermore, `DataCollection` and `DataFile`
+
+
+## Statuses
+
+Files registered in the data manifest can have multiple statuses: 
+
+ - **Local status**: 
+   - **Current**: digest agrees between manifest and the local file.
+
+   - **Modified**: digest disagrees between manifest and the local file, i.e.
+     it has been modified.
+      
+   - **Deleted**: A record of this data file exists in the manifest, but the
+     file does not exist.
+
+   - **Invalid**: Invalid state.
+
+ - **Remote status**: 
+
+
+ - **Tracked**: whether the local data file is to be synchronized with remotes.
+
+ - **Local-Remote MD5 mismatch**: 
+
+In data manifest, not tracked: upon push, will not be uploaded to remote. If
+it's on the remote, this should prompt an error.
+
+
+
+
 
 
 ## TODO
