@@ -241,6 +241,7 @@ impl MergedFile {
             (Some(LocalStatusCode::Current), Some(true)) => {
                 // Will pull with --overwrite. 
                 // Will push with --overwrite.
+                println!("Different: {:?}, {:?} {:?}", self.name(), self.local_md5(path_context), self.remote_md5());
                 RemoteStatusCode::Different
             },
             (Some(LocalStatusCode::Current), None) => {
@@ -735,8 +736,8 @@ impl DataCollection {
 
                     if do_upload {
                         let data_file = local.ok_or(anyhow!("Internal error (do_upload() with MergedFile.local = None): please report."))?;
-                        print_info!("uploading file '{:?}' to {:}", data_file.path, remote.name());
-                        remote.upload(&data_file, path_context).await?;
+                        print_info!("uploading file {:?} to {}", data_file.path, remote.name());
+                        remote.upload(&data_file, path_context, overwrite).await?;
                         num_uploaded += 1;
                     }
 

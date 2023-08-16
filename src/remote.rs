@@ -62,7 +62,13 @@ impl RemoteFile {
         self.md5 = Some(md5);
     }
     pub fn get_md5(&self) -> Option<String> {
-        self.md5.clone()
+        let md5 = self.md5.clone();
+        match md5 {
+            Some(digest) => {
+                if digest.len() > 0 { Some(digest) } else { None }
+            },
+            None => None
+        }
     }
     pub fn set_size(&mut self, size: u64) {
         self.size = Some(size);
@@ -173,9 +179,9 @@ impl Remote {
         Ok(())
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context).await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context, overwrite).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }

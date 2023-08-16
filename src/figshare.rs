@@ -1,4 +1,5 @@
 use url::Url;
+use std::any;
 use std::fs::File;
 use std::path::{Path};
 use std::io::{Read,Seek,SeekFrom};
@@ -12,7 +13,7 @@ use reqwest::{Method, header::{HeaderMap, HeaderValue}};
 use reqwest::{Client, Response};
 use colored::Colorize;
 
-use crate::print_warn;
+use crate::{print_info,print_warn};
 use crate::data::DataFile;
 use crate::remote::{AuthKeys, RemoteFile};
 
@@ -39,26 +40,6 @@ pub struct FigShareAPI {
 
 pub struct FigShareUpload<'a> {
     api_instance: &'a FigShareAPI,
-}
-
-/// FigShare has many upload responses that we mimic ---
-/// annoyingly they are all slightly different.
-/// This one is after the initial GET using the "location"
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FigShareUploadInfo {
-    upload_token: String,
-    upload_url: String,
-    status: String,
-    preview_state: String,
-    viewer_type: String,
-    is_attached_to_public_version: bool,
-    id: u64,
-    name: String,
-    size: u64,
-    is_link_only: bool,
-    download_url: String,
-    supplied_md5: String,
-    computed_md5: String,
 }
 
 /// The response from GETs to /account/articles/{article_id}/files
@@ -161,18 +142,16 @@ impl<'a> FigShareUpload<'a> {
         })
     }
 
+    // Get or Create an Article in a FigShare Project
     pub async fn get_or_create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
         let article = self.get_article(data_file).await?;
         match article {
-            Some(article) => {
-                //info!("get_or_create_article_in_project() found {:?}", article);
-                Ok(article)
-            },
+            Some(article) => Ok(article),
             None => self.create_article_in_project(data_file).await
         }
     }
 
-    async fn init_upload(&self, data_file: &DataFile, article: &FigShareArticle) -> Result<(FigShareUploadInfo, FigSharePendingUploadInfo)> {
+    async fn init_upload(&self, data_file: &DataFile, article: &FigShareArticle) -> Result<(FigShareFileInfo, FigSharePendingUploadInfo)> {
         debug!("initializing upload of '{:?}'", data_file);
         // Requires: article ID, in FigShareArticle struct
         // (0) create URL and data
@@ -207,7 +186,7 @@ impl<'a> FigShareUpload<'a> {
         let response = self.api_instance
             .issue_request::<HashMap<String, String>>(Method::GET, &location, None)
             .await?;
-        let upload_info: FigShareUploadInfo = response.json().await?;
+        let upload_info: FigShareFileInfo = response.json().await?;
         debug!("upload info: {:?}", upload_info);
 
         // (4) Now, we need to issue another GET to initiate upload.
@@ -222,7 +201,7 @@ impl<'a> FigShareUpload<'a> {
     }
 
     async fn upload_parts(&self, data_file: &DataFile, 
-                          upload_info: &FigShareUploadInfo,
+                          upload_info: &FigShareFileInfo,
                           pending_upload_info: &FigSharePendingUploadInfo,
                           path_context: &Path) -> Result<()> {
         let full_path = path_context.join(&data_file.path);
@@ -247,7 +226,7 @@ impl<'a> FigShareUpload<'a> {
         Ok(())
     }
 
-    async fn complete_upload(&self, article: &FigShareArticle, upload_info: &FigShareUploadInfo) -> Result<()> {
+    async fn complete_upload(&self, article: &FigShareArticle, upload_info: &FigShareFileInfo) -> Result<()> {
         let url = format!("account/articles/{}/files/{}", article.id, upload_info.id);
         let data = FigShareCompleteUpload {
             id: article.id,
@@ -258,8 +237,22 @@ impl<'a> FigShareUpload<'a> {
         Ok(())
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         let article = self.get_or_create_article_in_project(data_file).await?.clone();
+
+        // check if any files are associated with this article
+        let files = self.api_instance.article_files(&article).await?;
+        if files.len() > 0 {
+            if !overwrite {
+                print_info!("FigShare::upload() found article '{}' has {} file(s) \
+                            associated with it. Since overwrite=false, these will \
+                            not be deleted.", article.title, files.len());
+            } else {
+                info!("FigShare::upload() is deleting {} file(s) since overwrite=true.", 
+                      files.len());
+                self.api_instance.delete_article_files(&article);
+            } 
+        } 
         debug!("upload() article: {:?}", article);
         let (upload_info, pending_upload_info) = self.init_upload(data_file, &article).await?;
         self.upload_parts(data_file, &upload_info, &pending_upload_info, &path_context).await?;
@@ -366,9 +359,9 @@ impl FigShareAPI {
             }
         }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         let this_upload = FigShareUpload::new(self);
-        this_upload.upload(data_file, path_context).await?;
+        this_upload.upload(data_file, path_context, overwrite).await?;
         Ok(())
     }
 
@@ -517,7 +510,8 @@ impl FigShareAPI {
             Ok(files_info[0].clone())
         } else {
             Err(anyhow!("FigShare article (ID={}) has multiple files ({} total) associated with it; \
-                        this is not presently supported", &article.id, files_info.len()))
+                        this is not presently supported. Please log on to figshare.com and delete \
+                        them manually.", &article.id, files_info.len()))
         }
     }
 
@@ -528,9 +522,40 @@ impl FigShareAPI {
         Ok(())
     }
 
-    pub async fn track(&self) -> Result<()> {
+
+    // List all the files in an Article
+    // Note: in SciFlow's use of FigShare, there should only be one file per article
+    pub async fn article_files(&self, article: &FigShareArticle) -> Result<Vec<FigShareFileInfo>> {
+        let article_id = article.id;
+        let url = format!("account/articles/{}/files", article_id);
+        let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None).await?;
+        let files: Vec<FigShareFileInfo> = response.json().await?;
+        Ok(files)
+    }
+
+    // Delete Article
+    async fn delete_article(&self, article: &FigShareArticle) -> Result<()> {
+        let url = format!("account/articles/{}", article.id);
+        self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
         Ok(())
     }
+
+    // Delete all the articles in a file
+    async fn delete_article_files(&self, article: &FigShareArticle) -> Result<()> {
+        let files = self.article_files(article).await?;
+        if files.len() > 1 {
+            print_warn!("delete_article_files() has found a FigShare article (ID={}) with multiple files. \
+                        This is not supported, and may cause errors.", article.id);
+        }
+        for file in files {
+            let url = format!("account/articles/{}/files/{}", article.id, file.id);
+            self.issue_request::<HashMap<String,String>>(Method::DELETE, &url, None).await?;
+            info!("deleted FigShare file '{}' (Article ID={})", file.name, article.id);
+        }
+        Ok(())
+    }
+
+
 }
 
 
