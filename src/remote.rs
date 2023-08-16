@@ -44,7 +44,7 @@ pub struct RemoteFile {
 //
 // Clean state: everything on the manifest tracked by the remote is
 // local, with nothing else.
-#[derive(PartialEq,Clone)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum RemoteStatusCode {
     Current,              // local and remote files are identical
     MessyLocal,           // local file is different than remote and manifest, which agree
@@ -52,6 +52,7 @@ pub enum RemoteStatusCode {
     NotExists,            // no remote file
     Exists,               // remote file exists, but remote does not support MD5s
     NoLocal,              // a file on the remote, but not in manifest or found locally
+    DeletedLocal,         // a file on the remote and in manifest, but not found locally
     //OutsideSource,        // a file on the remote, but not in manifest but *is* found locally
     Invalid
 }

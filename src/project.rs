@@ -143,10 +143,10 @@ impl Project {
     pub async fn status(&mut self, include_remotes: bool) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.
-        let abbrev = Some(8);
         let path_context = &canonicalize(self.path_context())?;
         let status_rows = self.data.status(path_context, include_remotes).await?;
-        print_fixed_width_status(status_rows, None, None, true);
+        //let remotes: Option<_> = include_remotes.then(|| &self.data.remotes);
+        print_status(status_rows, Some(&self.data.remotes));
         Ok(())
     }
 
