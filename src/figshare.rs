@@ -119,8 +119,9 @@ impl<'a> FigShareUpload<'a> {
 
     pub async fn get_article(&self, data_file: &DataFile) -> Result<Option<FigShareArticle>> {
         let remote_files = self.api_instance.get_files_hashmap().await?;
+        let name = data_file.basename()?;
         let found_article = remote_files.values()
-            .find(|article| &article.title == &data_file.path)
+            .find(|article| article.title == name)
             .cloned();
         Ok(found_article)
     }
@@ -163,7 +164,10 @@ impl<'a> FigShareUpload<'a> {
     pub async fn get_or_create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
         let article = self.get_article(data_file).await?;
         match article {
-            Some(article) => Ok(article),
+            Some(article) => {
+                //info!("get_or_create_article_in_project() found {:?}", article);
+                Ok(article)
+            },
             None => self.create_article_in_project(data_file).await
         }
     }
