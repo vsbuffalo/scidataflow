@@ -112,7 +112,8 @@ impl StatusEntry {
                 },
                 Some(RemoteStatusCode::NotExists) => "not on remote".to_string(),
                 Some(RemoteStatusCode::NoLocal) => "unknown (messy remote)".to_string(),
-                Some(RemoteStatusCode::Exists) => "  ???  ".to_string(),
+                Some(RemoteStatusCode::Exists) => "exists, no remote MD5".to_string(),
+                Some(RemoteStatusCode::DeletedLocal) => "exists on remote".to_string(),
                 _ => "invalid".to_string()
             };
             columns.push(remote_status_msg.to_string());

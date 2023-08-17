@@ -1,3 +1,9 @@
+// FigShare API
+//
+// Notes:
+// FigShare's API design is, in my view, a bit awkward. 
+// There are articles, files, and projects. 
+
 use url::Url;
 use std::any;
 use std::fs::File;
@@ -365,16 +371,18 @@ impl FigShareAPI {
         Ok(())
     }
 
+
+    // Download a single file.
     pub async fn download(&self, data_file: &DataFile, path_context: &Path,
                           overwrite: bool) -> Result<()>{
         if data_file.is_alive(path_context) && !overwrite {
             return Err(anyhow!("Data file '{}' exists locally, and would be \
-                               overwritten by download. Use --overwrite.", data_file.path));
+                               overwritten by download. Use --overwrite to download.",
+                               data_file.path));
         }
+        //TODO
+        //let url = format!("file/download/{}", );
         Ok(())
-    }
-
-    fn ls(&self) {
     }
 
     /// Get all projects on this remote
@@ -476,9 +484,9 @@ impl FigShareAPI {
 
         if check_for_duplicate_article_titles(&articles).len() > 0 {
             print_warn!("FigShare has multiple files with the \
-                           same name (as different 'articles'). This can lead \
-                           to problems, and these should be removed manually \
-                           on FigShare.com.");
+                        same name (as different 'articles'). This can lead \
+                        to problems, and these should be removed manually \
+                        on FigShare.com.");
         }
         Ok(articles)
         }
