@@ -144,20 +144,13 @@ impl Remote {
             Remote::DataDryadAPI(_) => "Dryad",
         }
     }
-    pub async fn get_projects(&self) -> Result<Vec<Value>> {
+    // initialize the remote (i.e. tell it we have a new empty data set)
+    pub async fn remote_init(&mut self) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.get_projects().await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.remote_init().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-
-    pub async fn set_project(&mut self) -> Result<u64> {
-        match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.set_project().await,
-            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
-        }
-    }
-
     pub async fn get_files(&self) -> Result<Vec<RemoteFile>> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.get_remote_files().await,

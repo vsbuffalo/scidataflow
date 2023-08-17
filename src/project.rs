@@ -223,10 +223,20 @@ impl Project {
         // (3) authenticate remote
         authenticate_remote(&mut remote)?;
 
-        // (4) get the project ID
-        remote.set_project().await?;
+        // (4) validate this a proper remote directory (this is 
+        // also done in register_remote() for caution, 
+        // but we also want do it here to prevent the situation
+        // where self.data.register_remote() fails, but remote_init()
+        // is already done.
+        self.data.validate_remote_directory(&dir)?;
 
-        // (4) register the remote in the manifest
+        // (5) initialize the remote (e.g. for FigShare, this
+        // checks that the article doesn't exist (error if it
+        // does), creates it, and sets the FigShare.article_id 
+        // once it is assigned by the remote).
+        remote.remote_init().await?;
+
+        // (6) register the remote in the manifest
         self.data.register_remote(&dir, remote)?;
         self.save()
     }

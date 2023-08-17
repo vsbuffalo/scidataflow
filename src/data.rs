@@ -96,9 +96,15 @@ impl StatusEntry {
             _ => "no file"
         };
 
+        let tracked = match (self.include_remotes(), self.tracked) {
+            (false, _) => "".to_string(),
+            (true, Some(true)) => ", tracked".to_string(),
+            (true, Some(false)) => ", untracked".to_string(),
+            (_, _) => return Err(anyhow!("Invalid tracking state"))
+        };
         let mut columns = vec![
             self.name.clone(),
-            local_status_msg.to_string(),
+            format!("{}{}", local_status_msg, tracked),
             md5_string,
             mod_time_pretty,
         ];
@@ -134,8 +140,8 @@ pub struct DataFile {
 
 // A merged DataFile and RemoteFile
 // 
-// remote_service: Some(String) remote name if this file is tracked
-// by a remote. None if there is no remote. None distinguishes 
+// remote_service: Some(String) remote name if this file's directory 
+// is linked to a remote. None if there is no remote. None distinguishes 
 // the important cases when remote = NotExists (there is no remote
 // file) due to there not being a remote tracking, and remote = NotExists
 // due to the remote being configured, but the file not existing (e.g.
@@ -149,7 +155,7 @@ pub struct MergedFile {
 
 
 impl MergedFile {
-    pub fn merge(data_file: &DataFile, remote_file: &RemoteFile, remote_service: Option<String>) -> Result<MergedFile> {
+    pub fn new(data_file: &DataFile, remote_file: &RemoteFile, remote_service: Option<String>) -> Result<MergedFile> {
         Ok(MergedFile {
             local: Some(data_file.clone()),
             remote: Some(remote_file.clone()),
@@ -242,7 +248,6 @@ impl MergedFile {
             (Some(LocalStatusCode::Current), Some(true)) => {
                 // Will pull with --overwrite. 
                 // Will push with --overwrite.
-                println!("Different: {:?}, {:?} {:?}", self.name(), self.local_md5(path_context), self.remote_md5());
                 RemoteStatusCode::Different
             },
             (Some(LocalStatusCode::Current), None) => {
@@ -484,9 +489,11 @@ impl DataCollection {
         Ok(())
     }
 
-    pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<()> {
-        let dir_path = Path::new(dir);
 
+    // Validate the directory as being tracked by a remote, 
+    // i.e. no nesting.
+    pub fn validate_remote_directory(&self, dir: &String) -> Result<()> {
+        let dir_path = Path::new(dir);
         // check if the directory itself is already tracked.
         if self.remotes.contains_key(dir) {
             return Err(anyhow!("Directory '{}' is already tracked in the data manifest. You can manually delete it and re-add.", dir));
@@ -507,6 +514,25 @@ impl DataCollection {
                 return Err(anyhow!("Cannot add '{}' because it is a subdirectory of already tracked directory '{}'.", dir, existing_dir));
             }
         }
+        Ok(())
+    }
+
+    pub fn get_this_files_remote(&self, data_file: &DataFile) -> Result<Option<String>> {
+        let path = data_file.directory()?;
+        let res: Vec<String> = self.remotes.iter()
+            .filter(|(r, _v)| PathBuf::from(&path).starts_with(&r))
+            .map(|(_r, v)| v.name().to_string())
+            .collect();
+
+        match res.len() {
+            0 => Ok(None),
+            1 => Ok(Some(res[0].clone())),
+            _ => Err(anyhow!("Invalid state: too many remotes found.")),
+        }
+    }
+
+    pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<()> {
+        self.validate_remote_directory(dir)?;
         self.remotes.insert(dir.to_string(), remote);
         Ok(())
     }
@@ -568,6 +594,7 @@ impl DataCollection {
             let remote_files = remote.get_files_hashmap().await?;
             all_remote_files.insert((remote.name().to_string(), path.clone()), remote_files);
         }
+        info!("fetch() remote files: {:?}", all_remote_files);
         Ok(all_remote_files)
     }
 
@@ -580,16 +607,18 @@ impl DataCollection {
         // directory -> {(filename -> MergedFile), ...}
         let mut result: HashMap<String, HashMap<String, MergedFile>> = HashMap::new();
 
+
         // Initialize the result with local files
         // TODO: we need to fix remote_service here, for the
         // case where we have a local file in a tracked directory
         // but it won't merge with a remote file later on.
         for (name, local_file) in &self.files {
+            let remote_service = self.get_this_files_remote(local_file)?;
             //info!("local_file: {:?}", local_file);
             let dir = local_file.directory()?;
             result.entry(dir).or_insert_with(HashMap::new)
                 .insert(name.clone(),
-                MergedFile { local: Some(local_file.clone()), remote: None, remote_service: None });
+                MergedFile { local: Some(local_file.clone()), remote: None, remote_service  });
         }
 
         if !include_remotes {
@@ -628,7 +657,7 @@ impl DataCollection {
     pub async fn status(&mut self, path_context: &Path, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
         // get all merged files, used to compute the status
         let merged_files = self.merge(include_remotes).await?;
-        //println!("merged_file: {:?}", merged_files);
+        info!("merged_file: {:?}", merged_files);
 
         let mut statuses = BTreeMap::new();
 
@@ -747,7 +776,7 @@ impl DataCollection {
         }
         println!("Uploaded {}.", pluralize(num_uploaded as u64, "file"));
         let num_skipped = overwrite_skipped.len() + current_skipped.len() +
-                          messy_skipped.len() + untracked_skipped.len();
+            messy_skipped.len() + untracked_skipped.len();
         println!("Skipped {} files:", num_skipped);
         if untracked_skipped.len() > 0 {
             println!("  Untracked: {}", pluralize(untracked_skipped.len() as u64, "file"));
@@ -771,12 +800,12 @@ impl DataCollection {
         }
         if messy_skipped.len() > 0 {
             println!("  Local is \"messy\" (manifest and file disagree): {}",
-                     pluralize(messy_skipped.len() as u64, "file"));
+            pluralize(messy_skipped.len() as u64, "file"));
             for path in messy_skipped {
                 println!("   - {:}", path);
             }
         }
- 
+
         Ok(())
     }
 

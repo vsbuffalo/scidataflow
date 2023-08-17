@@ -38,7 +38,8 @@ fn figshare_api_url() -> String {
 pub struct FigShareAPI {
     #[serde(skip_serializing, skip_deserializing,default="figshare_api_url")]
     base_url: String,
-    project_id: Option<u64>,
+    // one remote corresponds to a FigShare article
+    article_id: Option<u64>,
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
     token: String
@@ -50,7 +51,7 @@ pub struct FigShareUpload<'a> {
 
 /// The response from GETs to /account/articles/{article_id}/files
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FigShareFileInfo {
+pub struct FigShareFile {
     upload_token: String,
     upload_url: String,
     status: String,
@@ -65,6 +66,14 @@ pub struct FigShareFileInfo {
     supplied_md5: String,
     computed_md5: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FigShareNewUpload {
+    md5: String,
+    name: String,
+    size: u64
+}
+ 
 
 /// This struct is for response to the initial GET using the
 /// upload_url. It contains more details about the actual upload.
@@ -104,76 +113,20 @@ impl<'a> FigShareUpload<'a> {
         FigShareUpload { api_instance: api }
     }
 
-    pub async fn get_article(&self, data_file: &DataFile) -> Result<Option<FigShareArticle>> {
-        let remote_files = self.api_instance.get_files_hashmap().await?;
-        let name = data_file.basename()?;
-        let found_article = remote_files.values()
-            .find(|article| article.title == name)
-            .cloned();
-        Ok(found_article)
-    }
-
-    pub async fn create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
-        // (0) Get the project_id
-        let project_id = self.api_instance.project_id;
-        let url = match project_id {
-            Some(id) => Ok(format!("account/projects/{}/articles", id)),
-            None => Err(anyhow!("Cannot create article in project; project ID is None"))
-        }?;
-
-        // (1) create the data for this article
-        let mut data: HashMap<String, String> = HashMap::new();
-        data.insert("title".to_string(), data_file.basename()?);
-        data.insert("defined_type".to_string(), "dataset".to_string());
-        debug!("creating data for article: {:?}", data);
-
-        // (2) issue request and parse out the article ID from location
-        let response = self.api_instance.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
-        let data = response.json::<Value>().await?;
-        let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
-            Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
-            None => Err(anyhow!("Response does not have 'location' set!"))
-        };
-        let article_id: u64 = article_id_result?.parse::<u64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
-        debug!("got article ID: {:?}", article_id);
-
-        // (3) create and return the FigShareArticle
-        Ok(FigShareArticle {
-            title: data_file.path.clone(),
-            name: Some(data_file.path.clone()),
-            id: article_id,
-            url: None,
-            md5: None,
-            size: None
-        })
-    }
-
-    // Get or Create an Article in a FigShare Project
-    pub async fn get_or_create_article_in_project(&self, data_file: &DataFile) -> Result<FigShareArticle> {
-        let article = self.get_article(data_file).await?;
-        match article {
-            Some(article) => Ok(article),
-            None => self.create_article_in_project(data_file).await
-        }
-    }
-
-    async fn init_upload(&self, data_file: &DataFile, article: &FigShareArticle) -> Result<(FigShareFileInfo, FigSharePendingUploadInfo)> {
+   async fn init_upload(&self, data_file: &DataFile) -> Result<(FigShareFile, FigSharePendingUploadInfo)> {
         debug!("initializing upload of '{:?}'", data_file);
         // Requires: article ID, in FigShareArticle struct
         // (0) create URL and data
-        let url = format!("account/articles/{}/files", article.id);
-        let data = FigShareArticle {
-            title: article.title.clone(),
-            name: Some(article.title.clone()),
-            id: article.id,
-            url: None,
-            md5: Some(data_file.md5.clone()),
-            size: Some(data_file.size)
+        let article_id = self.api_instance.get_article_id()?;
+        let url = format!("account/articles/{}/files", article_id);
+        let data = FigShareNewUpload {
+            name: data_file.basename()?,
+            md5: data_file.md5.clone(),
+            size: data_file.size
         };
         // (1) issue POST to get location
         let response = self.api_instance.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
         debug!("upload post response: {:?}", response);
-
 
         // (2) get location
         let data = response.json::<Value>().await?;
@@ -192,7 +145,7 @@ impl<'a> FigShareUpload<'a> {
         let response = self.api_instance
             .issue_request::<HashMap<String, String>>(Method::GET, &location, None)
             .await?;
-        let upload_info: FigShareFileInfo = response.json().await?;
+        let upload_info: FigShareFile = response.json().await?;
         debug!("upload info: {:?}", upload_info);
 
         // (4) Now, we need to issue another GET to initiate upload.
@@ -207,7 +160,7 @@ impl<'a> FigShareUpload<'a> {
     }
 
     async fn upload_parts(&self, data_file: &DataFile, 
-                          upload_info: &FigShareFileInfo,
+                          upload_info: &FigShareFile,
                           pending_upload_info: &FigSharePendingUploadInfo,
                           path_context: &Path) -> Result<()> {
         let full_path = path_context.join(&data_file.path);
@@ -224,7 +177,7 @@ impl<'a> FigShareUpload<'a> {
             file.read_exact(&mut data)?;
 
             let part_url = format!("{}/{}", &url, part.part_no);
-            let response = self.api_instance.issue_request::<HashMap<String, String>>(Method::PUT, &part_url, Some(RequestData::Binary(data)))
+            let _response = self.api_instance.issue_request::<HashMap<String, String>>(Method::PUT, &part_url, Some(RequestData::Binary(data)))
                 .await?;
             debug!("uploaded part {} (offsets {}:{})", part.part_no, start_offset, end_offset)
         }
@@ -232,10 +185,11 @@ impl<'a> FigShareUpload<'a> {
         Ok(())
     }
 
-    async fn complete_upload(&self, article: &FigShareArticle, upload_info: &FigShareFileInfo) -> Result<()> {
-        let url = format!("account/articles/{}/files/{}", article.id, upload_info.id);
+    async fn complete_upload(&self, upload_info: &FigShareFile) -> Result<()> {
+        let article_id = self.api_instance.get_article_id()?;
+        let url = format!("account/articles/{}/files/{}", article_id, upload_info.id);
         let data = FigShareCompleteUpload {
-            id: article.id,
+            id: article_id,
             name: upload_info.name.clone(),
             size: upload_info.size
         };
@@ -244,35 +198,38 @@ impl<'a> FigShareUpload<'a> {
     }
 
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
-        let article = self.get_or_create_article_in_project(data_file).await?.clone();
-
+        if !data_file.is_alive(path_context) {
+            return Err(anyhow!("Cannot upload: file '{}' does not exist lcoally.", data_file.path));
+        }
         // check if any files are associated with this article
-        let files = self.api_instance.article_files(&article).await?;
-        if files.len() > 0 {
+        let article_id = self.api_instance.get_article_id()?;
+        let name = data_file.basename()?;
+        let existing_file = self.api_instance.file_exists(&name).await?;
+        if let Some(file) = existing_file {
             if !overwrite {
-                print_info!("FigShare::upload() found article '{}' has {} file(s) \
-                            associated with it. Since overwrite=false, these will \
-                            not be deleted.", article.title, files.len());
+                print_info!("FigShare::upload() found file '{}' in FigShare \
+                            Article ID={} file(s) associated with it. Since \
+                            overwrite=false, this file will not be deleted.",
+                            name, article_id);
             } else {
-                info!("FigShare::upload() is deleting {} file(s) since overwrite=true.", 
-                      files.len());
-                self.api_instance.delete_article_files(&article);
+                info!("FigShare::upload() is deleting file '{}' since \
+                      overwrite=true.", name);
+                self.api_instance.delete_article_file(&file);
             } 
         } 
-        debug!("upload() article: {:?}", article);
-        let (upload_info, pending_upload_info) = self.init_upload(data_file, &article).await?;
+        let (upload_info, pending_upload_info) = self.init_upload(data_file).await?;
         self.upload_parts(data_file, &upload_info, &pending_upload_info, &path_context).await?;
-        self.complete_upload(&article, &upload_info).await?;
+        self.complete_upload(&upload_info).await?;
         Ok(())
     }
 }
 
-impl From<FigShareArticle> for RemoteFile {
-    fn from(fgsh: FigShareArticle) -> Self {
+impl From<FigShareFile> for RemoteFile {
+    fn from(fgsh: FigShareFile) -> Self {
         RemoteFile {
-            name: fgsh.title,
-            md5: fgsh.md5,
-            size: fgsh.size,
+            name: fgsh.name,
+            md5: Some(fgsh.computed_md5),
+            size: Some(fgsh.size),
             remote_service: "FigShare".to_string()
         }
     }
@@ -281,23 +238,7 @@ impl From<FigShareArticle> for RemoteFile {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct FigShareArticle {
     title: String,
-    name: Option<String>,
-    id: u64,
-    url: Option<String>,
-    md5: Option<String>,
-    size: Option<u64>
-}
-
-impl FigShareArticle {
-    pub fn set_md5(&mut self, md5: String) {
-        self.md5 = Some(md5);
-    }
-    pub fn get_md5(&self) -> Option<String> {
-        self.md5.clone()
-    }
-    pub fn set_size(&mut self, size: u64) {
-        self.size = Some(size);
-    }
+    id: u64
 }
 
 impl FigShareAPI {
@@ -306,7 +247,7 @@ impl FigShareAPI {
         let token = auth_keys.get("figshare".to_string())?;
         Ok(FigShareAPI { 
             base_url: FIGSHARE_API_URL.to_string(),
-            project_id: None,
+            article_id: None,
             name, 
             token
         })
@@ -316,9 +257,6 @@ impl FigShareAPI {
         self.token = token;
     }
 
-    fn set_project_id(&mut self, project_id: u64) {
-        self.project_id = Some(project_id);
-    }
     async fn issue_request<T: serde::Serialize>(&self, method: Method, url: &str,
                                                 data: Option<RequestData<T>>) 
         -> Result<Response> {
@@ -365,6 +303,33 @@ impl FigShareAPI {
             }
         }
 
+    // Create a new FigShare Article
+    pub async fn create_article(&self, title: &str) -> Result<FigShareArticle> {
+        let url = "account/articles";
+
+        // (1) create the data for this article
+        let mut data: HashMap<String, String> = HashMap::new();
+        data.insert("title".to_string(), title.to_string());
+        data.insert("defined_type".to_string(), "dataset".to_string());
+        debug!("creating data for article: {:?}", data);
+
+        // (2) issue request and parse out the article ID from location
+        let response = self.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
+        let data = response.json::<Value>().await?;
+        let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
+            Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
+            None => Err(anyhow!("Response does not have 'location' set!"))
+        };
+        let article_id: u64 = article_id_result?.parse::<u64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+        debug!("got article ID: {:?}", article_id);
+
+        // (3) create and return the FigShareArticle
+        Ok(FigShareArticle {
+            title: title.to_string(),
+            id: article_id,
+        })
+    }
+
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         let this_upload = FigShareUpload::new(self);
         this_upload.upload(data_file, path_context, overwrite).await?;
@@ -385,111 +350,40 @@ impl FigShareAPI {
         Ok(())
     }
 
-    /// Get all projects on this remote
-    pub async fn get_projects(&self) -> Result<Vec<Value>> {
-        let url = "/account/projects";
+    // FigShare Remote initialization
+    // 
+    // This creates a FigShare article for the tracked directory.
+    pub async fn remote_init(&mut self) -> Result<()> {
+        // (1) Let's make sure there is no Article that exists
+        // with this same name
+        let articles = self.get_articles().await?;
+
+        let matches_found: Vec<_> = articles.iter().filter(|&a| a.title == self.name).collect();
+
+        if matches_found.len() > 0 {
+           return Err(anyhow!("An existing FigShare Article with the title \
+                              '{}' was found. Either delete it on figshare.com \
+                              or chose a different name.", self.name));
+        }
+
+        // (2) Now that no Article name clash has occurred, let's
+        // create the new article and get the ID
+        let article = self.create_article(&self.name).await?;
+
+        // (3) Set the Article ID
+        self.article_id = Some(article.id);
+        
+        Ok(())
+    }
+
+    // Get FigShare Articles as FigShareArticle
+    // TODO? does this get published data sets?
+    async fn get_articles(&self) -> Result<Vec<FigShareArticle>> {
+        let url = "/account/articles";
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
-        trace!("reponse: {:?}", response);
-        let data = response.json::<Vec<Value>>().await?;
-        Ok(data)
-    }
-
-    pub async fn check_project_exists(&self) -> Result<Option<u64>> {
-        let title = &self.name;
-        let projects = self.get_projects().await?;
-        //info!("PROJECTS: {:?}", projects);
-        let project = projects.iter().find(|project| {
-            match project.get("title") {
-                Some(value) => {
-                    if let Some(title_value) = value.as_str() {
-                        title_value == title.as_str()
-                    } else {
-                        false
-                    }
-                },
-                None => false,
-            }
-        });
-
-        match project {
-            Some(project) => match project.get("id") {
-                Some(id) => Ok(id.as_u64()),
-                None => Ok(None),
-            },
-            None => Ok(None),
-        }
-    }
-
-    pub async fn create_project(&self) -> Result<Value> {
-        let title = &self.name;
-        let existing_id = self.check_project_exists().await?;
-        trace!("existing_id: {:?}", existing_id);
-        if existing_id.is_some() {
-            return Err(anyhow!("A project with the title '{}' already exists", title));
-        }
-
-        let url = "/account/projects";
-
-        // build up the data
-        let data = vec![
-            ("title".to_string(), title.clone()),
-        ];
-        let data: HashMap<_, _> = data.into_iter().collect();
-
-        let response = self.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
-        trace!("response: {:?}", response);
-        let data = response.json::<Value>().await?;
-        info!("created remote project: {:?}", title);
-        Ok(data)
-    }
-
-    pub async fn set_project(&mut self) -> Result<u64> {
-        let existing_id = self.check_project_exists().await?;
-        let project_id = match existing_id {
-            Some(id) => {
-                info!("Found an existing FigShare project (ID={:?}).", id);
-                Ok(id)
-            },
-            None => match self.create_project().await {
-                Ok(data) => match data.get("entity_id") {
-                    Some(value) => match value.as_u64() {
-                        Some(id) => Ok(id),
-                        None => Err(anyhow!("Entity id is not an integer")),
-                    },
-                    None => Err(anyhow!("Entity id is missing")),
-                },
-                Err(err) => Err(anyhow!("Invalid response: {}", err)),
-            },
-        }?;
-
-        self.set_project_id(project_id);
-        Ok(project_id)
-    }
-
-    /// Get FigShare remote files as FigShareArticle
-    /// (for internal FigShare stuff, main interface is through the 
-    /// common RemoteFile).
-    async fn get_files(&self) -> Result<Vec<FigShareArticle>> {
-        let project_id = self.project_id.ok_or_else(|| anyhow!("The project ID is not set."))?;
-        trace!("get_data(): project_id={:?}", project_id);
-        let url = format!("/account/projects/{}/articles", project_id);
-
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
-        let mut articles: Vec<FigShareArticle> = response.json().await?;
-
-        // now we need to add in the supplementary FigShareArticle info
-        for article in articles.iter_mut() {
-            self.set_article_info(article).await?;
-        }
-
-        if check_for_duplicate_article_titles(&articles).len() > 0 {
-            print_warn!("FigShare has multiple files with the \
-                        same name (as different 'articles'). This can lead \
-                        to problems, and these should be removed manually \
-                        on FigShare.com.");
-        }
+        let articles: Vec<FigShareArticle> = response.json().await?;
         Ok(articles)
-        }
+    }
 
     pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
         let articles = self.get_files().await?;
@@ -497,80 +391,64 @@ impl FigShareAPI {
         Ok(remote_files)
     }
 
-    // This returns the unique FigShareArticles
-    // Warning: There can be clashing here!
-    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareArticle>> {
-        let mut articles: Vec<FigShareArticle> = self.get_files().await?;
-        let mut article_hash: HashMap<String,FigShareArticle> = HashMap::new();
+    // Get all files from a FigShare Article, in a HashMap
+    // with file name as keys.
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareFile>> {
+        let mut articles: Vec<FigShareFile> = self.get_files().await?;
+        let mut article_hash: HashMap<String,FigShareFile> = HashMap::new();
         for article in articles.iter_mut() {
-            self.set_article_info(article).await?;
-            article_hash.insert(article.title.clone(), article.clone());
+            article_hash.insert(article.name.clone(), article.clone());
         }
         Ok(article_hash)
     }
 
-    /// Get auxiliary data about the article
-    pub async fn get_article_info(&self, article: &FigShareArticle) -> Result<FigShareFileInfo> {
-        let url = format!("/account/articles/{}/files", article.id);
-        let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None).await?;
-        let files_info: Vec<FigShareFileInfo> = response.json().await?;
-        if files_info.len() == 1 {
-            Ok(files_info[0].clone())
-        } else {
-            Err(anyhow!("FigShare article (ID={}) has multiple files ({} total) associated with it; \
-                        this is not presently supported. Please log on to figshare.com and delete \
-                        them manually.", &article.id, files_info.len()))
-        }
+    // Check if file exists, returning None if not,
+    // and the FigShareFile if so
+    pub async fn file_exists(&self, name: &str) -> Result<Option<FigShareFile>> {
+        let files = self.get_files_hashmap().await?;
+        Ok(files.get(name).cloned())
     }
 
-    pub async fn set_article_info(&self, article: &mut FigShareArticle) -> Result<()> {
-        let info = self.get_article_info(&article).await?;
-        article.set_md5(info.computed_md5);
-        article.set_size(info.size);
-        Ok(())
+    pub fn get_article_id(&self) -> Result<u64> {
+        let article_id  = self.article_id.ok_or(anyhow!("Internal Error: FigShare.article_id is None."))?;
+        Ok(article_id)
     }
 
-
-    // List all the files in an Article
-    // Note: in SciFlow's use of FigShare, there should only be one file per article
-    pub async fn article_files(&self, article: &FigShareArticle) -> Result<Vec<FigShareFileInfo>> {
-        let article_id = article.id;
-        let url = format!("account/articles/{}/files", article_id);
+    // Get all files from the FigShare Article
+    pub async fn get_files(&self) -> Result<Vec<FigShareFile>> {
+        let article_id = self.get_article_id()?;
+        let url = format!("/account/articles/{}/files", article_id);
         let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None).await?;
-        let files: Vec<FigShareFileInfo> = response.json().await?;
+        let files: Vec<FigShareFile> = response.json().await?;
         Ok(files)
     }
 
     // Delete Article
-    async fn delete_article(&self, article: &FigShareArticle) -> Result<()> {
+    /* async fn delete_article(&self, article: &FigShareArticle) -> Result<()> {
         let url = format!("account/articles/{}", article.id);
         self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
         Ok(())
     }
+    */
 
-    // Delete all the articles in a file
-    async fn delete_article_files(&self, article: &FigShareArticle) -> Result<()> {
-        let files = self.article_files(article).await?;
-        if files.len() > 1 {
-            print_warn!("delete_article_files() has found a FigShare article (ID={}) with multiple files. \
-                        This is not supported, and may cause errors.", article.id);
-        }
-        for file in files {
-            let url = format!("account/articles/{}/files/{}", article.id, file.id);
-            self.issue_request::<HashMap<String,String>>(Method::DELETE, &url, None).await?;
-            info!("deleted FigShare file '{}' (Article ID={})", file.name, article.id);
-        }
+    // Delete the specified file from the FigShare Article
+    // 
+    // Note: we require a &FigShareFile as a way to enforce it exists,
+    // e.g. is the result of a previous query.
+    async fn delete_article_file(&self, file: &FigShareFile) -> Result<()> {
+        let article_id = self.get_article_id()?;
+        let url = format!("account/articles/{}/files/{}", article_id, file.id);
+        self.issue_request::<HashMap<String,String>>(Method::DELETE, &url, None).await?;
+        info!("deleted FigShare file '{}' (Article ID={})", file.name, article_id);
         Ok(())
     }
-
-
 }
 
 
 fn check_for_duplicate_article_titles(articles: &Vec<FigShareArticle>) -> HashSet<String> {
     let mut titles = HashSet::new();
     let mut duplicates = HashSet::new();
-    
+
     for article in articles {
         if !titles.insert(article.title.clone()) {
             duplicates.insert(article.title.clone());
