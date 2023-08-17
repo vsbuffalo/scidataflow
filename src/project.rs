@@ -265,8 +265,7 @@ impl Project {
     }
 
     pub async fn pull(&mut self, overwrite: bool) -> Result<()> {
-        self.data.pull(&self.path_context(), overwrite).await
-    }
+        self.data.pull(&self.path_context(), overwrite).await }
 
     pub async fn push(&mut self, overwrite: bool) -> Result<()> {
         self.data.push(&self.path_context(), overwrite).await

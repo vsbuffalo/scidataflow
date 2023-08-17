@@ -202,7 +202,8 @@ pub fn pluralize<T: Into<u64>>(count: T, noun: &str) -> String {
 
 pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>) {
     println!("{}", "Project data status:".bold());
-    println!("{} data {} registered.\n", rows.len(), pluralize(rows.len() as u64, "file"));
+    let total: usize = rows.values().map(|v| v.len()).sum();
+    println!("{} registered.\n", pluralize(total as u64, "data file"));
 
     // this brings the remote name (if there is a corresponding remote) into 
     // the key, so the linked remote can be displayed in the status 

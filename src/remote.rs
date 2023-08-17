@@ -12,7 +12,7 @@ use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 
 use crate::utils::ensure_exists;
-use crate::data::{DataFile,LocalStatusCode};
+use crate::data::{DataFile,LocalStatusCode, MergedFile};
 use crate::figshare::{FigShareAPI,FigShareArticle};
 use crate::dryad::{DataDryadAPI};
 
@@ -23,7 +23,8 @@ pub struct RemoteFile {
     pub name: String,
     pub md5: Option<String>,
     pub size: Option<u64>,
-    pub remote_service: String
+    pub remote_service: String,
+    pub url: Option<String>
 }
 
 
@@ -157,7 +158,6 @@ impl Remote {
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-
     pub async fn get_files_hashmap(&self) -> Result<HashMap<String,RemoteFile>> {
         // now we can use the common interface!
         let remote_files = self.get_files().await?;
@@ -167,33 +167,18 @@ impl Remote {
         }
         Ok(file_map)
     }
-
-    pub async fn track(&mut self) -> Result<(),String> {
-        Ok(())
-    }
-
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         match self {
             Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context, overwrite).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-    pub async fn download(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn download(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.download(data_file, path_context, overwrite).await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.download(merged_file, path_context, overwrite).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-
-
-
-    //pub async fn pull(&self, path_context: &PathBuf, overwrite: bool) -> Result<()> {
-    //    match self {
-    //        Remote::FigShareAPI(figshare_api) => figshare_api.download(path_context, overwrite).await,
-    //        Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
-    //    }
-    //}
-
 
 }
 

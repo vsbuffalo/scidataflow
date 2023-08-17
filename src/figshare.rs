@@ -7,6 +7,7 @@
 use url::Url;
 use std::any;
 use std::fs::File;
+use std::fs;
 use std::path::{Path};
 use std::io::{Read,Seek,SeekFrom};
 use anyhow::{anyhow,Result};
@@ -20,7 +21,7 @@ use reqwest::{Client, Response};
 use colored::Colorize;
 
 use crate::{print_info,print_warn};
-use crate::data::DataFile;
+use crate::data::{DataFile, MergedFile};
 use crate::remote::{AuthKeys, RemoteFile};
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
@@ -230,7 +231,8 @@ impl From<FigShareFile> for RemoteFile {
             name: fgsh.name,
             md5: Some(fgsh.computed_md5),
             size: Some(fgsh.size),
-            remote_service: "FigShare".to_string()
+            remote_service: "FigShare".to_string(),
+            url: Some(fgsh.download_url)
         }
     }
 }
@@ -258,50 +260,61 @@ impl FigShareAPI {
     }
 
     async fn issue_request<T: serde::Serialize>(&self, method: Method, url: &str,
-                                                data: Option<RequestData<T>>) 
-        -> Result<Response> {
-            let mut headers = HeaderMap::new();
+                                                data: Option<RequestData<T>>) -> Result<Response> {
+        let mut headers = HeaderMap::new();
 
-            let full_url = if url.starts_with("https://") || url.starts_with("http://") {
-                url.to_string()
-            } else {
-                format!("{}{}", self.base_url, url.trim_start_matches('/'))
-            };
+        let full_url = if url.starts_with("https://") || url.starts_with("http://") {
+            url.to_string()
+        } else {
+            format!("{}{}", self.base_url, url.trim_start_matches('/'))
+        };
 
-            trace!("request URL: {:?}", full_url);
+        trace!("request URL: {:?}", full_url);
 
-            headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
-            trace!("headers: {:?}", headers);
+        headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
+        trace!("headers: {:?}", headers);
 
-            let client = Client::new();
-            let response = match data {
-                Some(RequestData::Json(json_data)) => client
-                    .request(method, &full_url)
-                    .headers(headers)
-                    .json(&json_data)
-                    .send()
-                    .await?,
+        let client = Client::new();
+        let response = match data {
+            Some(RequestData::Json(json_data)) => client
+                .request(method, &full_url)
+                .headers(headers)
+                .json(&json_data)
+                .send()
+                .await?,
 
-                Some(RequestData::Binary(bin_data)) => client
-                    .request(method, &full_url)
-                    .headers(headers)
-                    .body(bin_data)
-                    .send()
-                    .await?,
+            Some(RequestData::Binary(bin_data)) => client
+                .request(method, &full_url)
+                .headers(headers)
+                .body(bin_data)
+                .send()
+                .await?,
 
-                None => client.request(method, &full_url)
-                    .headers(headers)
-                    .send()
-                    .await?,
-            };
+            None => client.request(method, &full_url)
+                .headers(headers)
+                .send()
+                .await?,
+        };
 
-            let response_status = response.status();
-            if response_status.is_success() {
-                Ok(response)
-            } else {
-                Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, full_url, response.text().await?))
-            }
+        let response_status = response.status();
+        if response_status.is_success() {
+            Ok(response)
+        } else {
+            Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, full_url, response.text().await?))
         }
+    }
+
+    async fn download_file(&self, url: &str, save_path: &Path) -> Result<()> {
+        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
+
+        // read bytes from the response
+        let bytes = response.bytes().await?;
+
+        // write bytes to a file
+        fs::write(save_path, bytes)?;
+
+        Ok(())
+    }
 
     // Create a new FigShare Article
     pub async fn create_article(&self, title: &str) -> Result<FigShareArticle> {
@@ -336,17 +349,29 @@ impl FigShareAPI {
         Ok(())
     }
 
-
     // Download a single file.
-    pub async fn download(&self, data_file: &DataFile, path_context: &Path,
-                          overwrite: bool) -> Result<()>{
+    pub async fn download(&self, merged_file: &MergedFile, 
+                          path_context: &Path, overwrite: bool) -> Result<()>{
+        // if local DataFile is none, not in manifest; 
+        // do not download
+        let data_file = match &merged_file.local {
+            None => return Err(anyhow!("Cannot download() without local DataFile.")),
+            Some(file) => file
+        };
+        // check to make sure we won't overwrite
         if data_file.is_alive(path_context) && !overwrite {
             return Err(anyhow!("Data file '{}' exists locally, and would be \
                                overwritten by download. Use --overwrite to download.",
                                data_file.path));
         }
-        //TODO
-        //let url = format!("file/download/{}", );
+        // if no remote, there is nothing to download,
+        // silently return Ok. Get URL.
+        let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
+        let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
+
+        // add the token in
+        let url = format!("{}?token={}", url, self.token);
+        self.download_file(&url, &data_file.full_path(&path_context)?).await?;
         Ok(())
     }
 
@@ -361,9 +386,9 @@ impl FigShareAPI {
         let matches_found: Vec<_> = articles.iter().filter(|&a| a.title == self.name).collect();
 
         if matches_found.len() > 0 {
-           return Err(anyhow!("An existing FigShare Article with the title \
-                              '{}' was found. Either delete it on figshare.com \
-                              or chose a different name.", self.name));
+            return Err(anyhow!("An existing FigShare Article with the title \
+                               '{}' was found. Either delete it on figshare.com \
+                               or chose a different name.", self.name));
         }
 
         // (2) Now that no Article name clash has occurred, let's
@@ -372,7 +397,7 @@ impl FigShareAPI {
 
         // (3) Set the Article ID
         self.article_id = Some(article.id);
-        
+
         Ok(())
     }
 
@@ -387,6 +412,9 @@ impl FigShareAPI {
 
     pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
         let articles = self.get_files().await?;
+        for rf in &articles {
+            info!("FigShareFile: {:?}", rf);
+        }
         let remote_files = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
@@ -425,11 +453,11 @@ impl FigShareAPI {
 
     // Delete Article
     /* async fn delete_article(&self, article: &FigShareArticle) -> Result<()> {
-        let url = format!("account/articles/{}", article.id);
-        self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
-        Ok(())
-    }
-    */
+       let url = format!("account/articles/{}", article.id);
+       self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
+       Ok(())
+       }
+       */
 
     // Delete the specified file from the FigShare Article
     // 

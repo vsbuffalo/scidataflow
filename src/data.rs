@@ -72,7 +72,9 @@ impl StatusEntry {
             (Some(true), Some(LocalStatusCode::Modified), _)  => line.red().to_string(),
             (Some(false), Some(LocalStatusCode::Modified), _)  => line.red().to_string(),
             (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Different))  => line.yellow().to_string(),
-            (Some(false), Some(LocalStatusCode::Current), _)  => line.green().to_string(),
+            // untracked, but exists on remote -- invalid
+            (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Different))  => line.cyan().to_string(),
+            (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Exists))  => line.cyan().to_string(),
             _ => {
                 //println!("{:?}: {:?}, {:?}, {:?}", self.name, tracked, local_status, remote_status);
                 line.cyan().to_string()
@@ -177,6 +179,10 @@ impl MergedFile {
             (None, Some(remote)) => Ok(remote.name.clone()),
             (None, None) => Err(anyhow!("Invalid state: both local and remote are None.")),
         }
+    }
+
+    pub fn can_download(&self) -> bool {
+        self.local.is_some() && self.remote.is_some()
     }
 
     pub fn has_remote(&self) -> Result<bool> {
@@ -594,7 +600,7 @@ impl DataCollection {
             let remote_files = remote.get_files_hashmap().await?;
             all_remote_files.insert((remote.name().to_string(), path.clone()), remote_files);
         }
-        info!("fetch() remote files: {:?}", all_remote_files);
+        //info!("fetch() remote files: {:?}", all_remote_files);
         Ok(all_remote_files)
     }
 
@@ -657,7 +663,7 @@ impl DataCollection {
     pub async fn status(&mut self, path_context: &Path, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
         // get all merged files, used to compute the status
         let merged_files = self.merge(include_remotes).await?;
-        info!("merged_file: {:?}", merged_files);
+        //info!("merged_file: {:?}", merged_files);
 
         let mut statuses = BTreeMap::new();
 
@@ -810,18 +816,24 @@ impl DataCollection {
     }
 
     pub async fn pull(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
-        // TODO before any pull, we need to make sure that the project
-        // status is "clean" e.g. nothing out of data.
-        self.authenticate_remotes()?;
-
-        //let files = remote.get_files().await?;
+        // Fetch all files as MergedFiles
+        // note: this authenticates
+        let all_files = self.merge(true).await?;
 
         let mut num_downloaded = 0;
-        for (dir, remote) in self.remotes.iter() {
-
+        for (dir, merged_files) in all_files {
+            let valid_merged_files = merged_files
+                .values()
+                .filter(|f| f.can_download());
+            for merged_file in valid_merged_files {
+                if let Some(remote) = self.remotes.get(&dir) {
+                    remote.download(merged_file, path_context, overwrite).await?;
+                    num_downloaded += 1;
+                }
+            }
         }
 
-        println!("Downloaded {} files.", num_downloaded);
+        println!("Downloaded {}.", pluralize(num_downloaded as u64, "file"));
         Ok(())
     }
 }
