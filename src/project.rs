@@ -5,7 +5,6 @@ use std::path::{Path,PathBuf};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::io::{Write};
-use colored::Colorize;
 
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
@@ -98,7 +97,7 @@ impl Project {
     }
 
     fn load(manifest: &PathBuf) -> Result<DataCollection> {
-        let contents = load_file(&manifest);
+        let contents = load_file(manifest);
 
         if contents.trim().is_empty() {
             // empty manifest, just create a new one
@@ -198,8 +197,8 @@ impl Project {
         self.save()
     }
 
-    pub async fn link(&mut self, dir: &String, service: &String, 
-                      key: &String, name: &Option<String>) -> Result<()> {
+    pub async fn link(&mut self, dir: &str, service: &str, 
+                      key: &str, name: &Option<String>) -> Result<()> {
         // (0) get the relative directory path
         let dir = self.relative_path_string(Path::new(dir))?;
 

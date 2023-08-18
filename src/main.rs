@@ -4,7 +4,6 @@ use crate::project::Project;
 use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
-use std::path::PathBuf;
 
 pub mod utils;
 pub mod project;
@@ -174,7 +173,7 @@ async fn run() -> Result<()> {
             proj.status(*remotes).await
         }
         Some(Commands::Stats {  }) => {
-            let proj = Project::new()?;
+            //let proj = Project::new()?;
             //proj.stats()
             Ok(())
         }

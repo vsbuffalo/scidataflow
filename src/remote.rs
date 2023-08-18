@@ -1,22 +1,34 @@
 use serde_yaml;
-use std::{fs};
+use std::fs;
 use std::fs::File;
-use std::path::{Path,PathBuf};
-use std::io::{Read};
+use std::path::Path;
+use std::io::Read;
 use std::env;
 use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
-use serde_json::Value;
+use crate::data::{DataFile,MergedFile};
+use crate::figshare::FigShareAPI;
+use crate::dryad::DataDryadAPI;
+use trauma::{download::Download};
+use reqwest::Url;
 
-use crate::utils::ensure_exists;
-use crate::data::{DataFile,LocalStatusCode, MergedFile};
-use crate::figshare::{FigShareAPI,FigShareArticle};
-use crate::dryad::{DataDryadAPI};
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DownloadInfo {
+    pub url: String,
+    pub path: String,
+} 
+
+impl DownloadInfo {
+    pub fn trauma_download(&self) -> Result<Download> {
+        Ok(Download::new(&Url::parse(&self.url)?, &self.path))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteFile {
@@ -64,19 +76,14 @@ impl RemoteFile {
     }
     pub fn get_md5(&self) -> Option<String> {
         let md5 = self.md5.clone();
-        match md5 {
-            Some(digest) => {
-                if digest.len() > 0 { Some(digest) } else { None }
-            },
-            None => None
-        }
+        md5.filter(|digest| !digest.is_empty())
     }
     pub fn set_size(&mut self, size: u64) {
         self.size = Some(size);
     }
 }
 
-#[derive(Serialize, Deserialize,  PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Default, PartialEq, Debug)]
 pub struct AuthKeys {
     keys: HashMap<String,String>
 }
@@ -105,9 +112,9 @@ impl AuthKeys {
         AuthKeys { keys }
     }
 
-    pub fn add(&mut self, service: &String, key: &String) {
+    pub fn add(&mut self, service: &str, key: &str) {
         let service = service.to_lowercase();
-        self.keys.insert(service, key.clone());
+        self.keys.insert(service, key.to_owned());
         self.save();
     }
 
@@ -173,18 +180,21 @@ impl Remote {
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-    pub async fn download(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    // Get Download info: the URL (with token) and destination
+    // TODO: could be struct, if some APIs require more authentication
+    // Note: requires each API actually *check* overwrite.
+    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<DownloadInfo> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.download(merged_file, path_context, overwrite).await,
+            Remote::FigShareAPI(figshare_api) => figshare_api.get_download_info(merged_file, path_context, overwrite),
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
-
 }
 
 pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
     // Get they keys off disk
     let auth_keys = AuthKeys::new();
+    #[allow(clippy::single_match)]
     match remote {
         Remote::FigShareAPI(ref mut figshare_api) => {
             let token = auth_keys.keys.get("figshare").cloned()

@@ -3,6 +3,7 @@ use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
 use serde::ser::SerializeMap;
+use std::thread;
 use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
@@ -12,6 +13,7 @@ use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fs;
+use trauma::{download::Download, downloader::DownloaderBuilder, Error};
 use colored::*;
 
 use crate::{print_warn,print_info};
@@ -57,7 +59,7 @@ impl StatusEntry {
         let tracked = self.tracked;
         let local_status = &self.local_status;
         let remote_status = &self.remote_status;
-        let line = match (tracked, local_status, remote_status) {
+        match (tracked, local_status, remote_status) {
             (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Current)) => line.green().to_string(),
             (Some(true), Some(LocalStatusCode::Current), None) => line.green().to_string(),
             (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists)) => line.green().to_string(),
@@ -79,8 +81,7 @@ impl StatusEntry {
                 //println!("{:?}: {:?}, {:?}, {:?}", self.name, tracked, local_status, remote_status);
                 line.cyan().to_string()
             }
-        };
-        line
+        }
     }
     pub fn columns(&self, abbrev: Option<i32>) -> Result<Vec<String>> {
         let local_status = &self.local_status;
@@ -161,7 +162,7 @@ impl MergedFile {
         Ok(MergedFile {
             local: Some(data_file.clone()),
             remote: Some(remote_file.clone()),
-            remote_service: remote_service
+            remote_service
         })
     }
 
@@ -186,7 +187,7 @@ impl MergedFile {
     }
 
     pub fn has_remote(&self) -> Result<bool> {
-        Ok(!self.remote.is_none())
+        Ok(self.remote.is_some())
     }
 
     pub fn is_tracked(&self) -> Option<bool> {
@@ -232,7 +233,7 @@ impl MergedFile {
         // local status, None if no local file found
         let local_status = self.local
             .as_ref()
-            .map_or(None, |local| local.status(path_context).ok());
+            .and_then(|local| local.status(path_context).ok());
         // TODO fix path_context
         //info!("{:?} local status: {:?} ({:?})", self.name(), local_status, &path_context);
 
@@ -283,13 +284,15 @@ impl MergedFile {
 
     // Create a StatusEntry, for printing the status to the user.
     pub async fn status_entry(&self, path_context: &Path, include_remotes: bool) -> Result<StatusEntry> {
-        let tracked = self.local.as_ref().map_or(None,|df| Some(df.tracked));
+        let tracked = self.local.as_ref().map(|df| df.tracked);
         let local_status = self.local
             .as_ref()
-            .map_or(None, |local| local.status(path_context).ok());
+            .and_then(|local| local.status(path_context).ok());
 
         let remote_status = if include_remotes { Some(self.status(path_context)?) } else { None };
         //let remote_status = if self.remote_service.is_some() { Some(self.status(path_context)?) } else { None };
+        
+        let remote_service = if include_remotes { self.remote_service.clone() } else { None };
 
         if self.local.is_none() && self.remote.is_none() {
             return Err(anyhow!("Internal error: MergedFile with no RemoteFile and DataFile set. Please report."));
@@ -300,7 +303,7 @@ impl MergedFile {
             local_status,
             remote_status,
             tracked,
-            remote_service: self.remote_service.clone(),
+            remote_service,
             local_md5: self.local_md5(path_context),
             remote_md5: self.remote_md5(),
             manifest_md5: self.manifest_md5(),
@@ -321,10 +324,10 @@ impl DataFile {
             .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", path, err))?
             .len();
         Ok(DataFile {
-            path: path,
+            path,
             tracked: false, 
-            md5: md5,
-            size: size,
+            md5,
+            size,
         })
     }
 
@@ -343,7 +346,7 @@ impl DataFile {
     pub fn directory(&self) -> Result<String> {
         let path = std::path::Path::new(&self.path);
         Ok(path.parent()
-           .unwrap_or_else(|| path)
+           .unwrap_or(path)
            .to_str()
            .unwrap_or("")
            .to_string())
@@ -361,7 +364,7 @@ impl DataFile {
 
     pub fn get_size(&self, path_context: &Path) -> Result<u64> {
         // use metadata() method to get file metadata and extract size
-        let size = metadata(&self.full_path(path_context)?)
+        let size = metadata(self.full_path(path_context)?)
             .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", self.path, err))?
             .len();
         Ok(size)
@@ -388,13 +391,15 @@ impl DataFile {
             (true, true) => LocalStatusCode::Modified,
             (false, false) => LocalStatusCode::Deleted,  // Invalid? (TODO)
             (true, false) => LocalStatusCode::Deleted,
+            // incase a line gets dropped above
+            #[allow(unreachable_patterns)]
             _ => LocalStatusCode::Invalid,
         };
         Ok(local_status)
     }
 
     pub fn update_md5(&mut self, path_context: &Path) -> Result<()> {
-        let new_md5 = match self.get_md5(&path_context)? {
+        let new_md5 = match self.get_md5(path_context)? {
             Some(md5) => md5,
             None => return Err(anyhow!("Cannot update MD5: file does not exist")),
         };
@@ -475,7 +480,7 @@ impl DataCollection {
         match filename {
             Some(file) => {
                 if let Some(data_file) = self.files.get_mut(file) {
-                    data_file.update_md5(&path_context)?;
+                    data_file.update_md5(path_context)?;
                     debug!("rehashed file {:?}", data_file.path);
                 }
             }
@@ -484,7 +489,7 @@ impl DataCollection {
                 let all_files: Vec<_> = self.files.keys().cloned().collect();
                 for file in all_files {
                     if let Some(data_file) = self.files.get_mut(&file) {
-                        data_file.update_md5(&path_context)?;
+                        data_file.update_md5(path_context)?;
                         debug!("rehashed file {:?}", data_file.path);
                     }
 
@@ -526,7 +531,7 @@ impl DataCollection {
     pub fn get_this_files_remote(&self, data_file: &DataFile) -> Result<Option<String>> {
         let path = data_file.directory()?;
         let res: Vec<String> = self.remotes.iter()
-            .filter(|(r, _v)| PathBuf::from(&path).starts_with(&r))
+            .filter(|(r, _v)| PathBuf::from(&path).starts_with(r))
             .map(|(_r, v)| v.name().to_string())
             .collect();
 
@@ -784,27 +789,27 @@ impl DataCollection {
         let num_skipped = overwrite_skipped.len() + current_skipped.len() +
             messy_skipped.len() + untracked_skipped.len();
         println!("Skipped {} files:", num_skipped);
-        if untracked_skipped.len() > 0 {
+        if !untracked_skipped.is_empty() {
             println!("  Untracked: {}", pluralize(untracked_skipped.len() as u64, "file"));
             for path in untracked_skipped {
                 println!("   - {:}", path);
             }
         }
-        if current_skipped.len() > 0 {
+        if !current_skipped.is_empty() {
             println!("  Remote file is indentical to local file: {}",
                      pluralize(current_skipped.len() as u64, "file"));
             for path in current_skipped {
                 println!("   - {:}", path);
             }
         }
-        if overwrite_skipped.len() > 0 {
+        if !overwrite_skipped.is_empty() {
             println!("  Would overwrite (use --overwrite to push): {}", 
                      pluralize(overwrite_skipped.len() as u64, "file"));
             for path in overwrite_skipped {
                 println!("   - {:}", path);
             }
         }
-        if messy_skipped.len() > 0 {
+        if !messy_skipped.is_empty() {
             println!("  Local is \"messy\" (manifest and file disagree): {}",
             pluralize(messy_skipped.len() as u64, "file"));
             for path in messy_skipped {
@@ -816,24 +821,27 @@ impl DataCollection {
     }
 
     pub async fn pull(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
-        // Fetch all files as MergedFiles
-        // note: this authenticates
         let all_files = self.merge(true).await?;
 
-        let mut num_downloaded = 0;
-        for (dir, merged_files) in all_files {
-            let valid_merged_files = merged_files
-                .values()
-                .filter(|f| f.can_download());
-            for merged_file in valid_merged_files {
-                if let Some(remote) = self.remotes.get(&dir) {
-                    remote.download(merged_file, path_context, overwrite).await?;
-                    num_downloaded += 1;
+        let mut downloads = Vec::new();
+
+        for (dir, merged_files) in all_files.iter() {
+            for merged_file in merged_files.values().filter(|f| f.can_download()) {
+                if let Some(remote) = self.remotes.get(dir) {
+                    let info = remote.get_download_info(merged_file, path_context, overwrite)?;
+                    let download = info.trauma_download()?;
+                    downloads.push(download);
                 }
             }
         }
 
-        println!("Downloaded {}.", pluralize(num_downloaded as u64, "file"));
+        let total_files = downloads.len();
+        let downloader = DownloaderBuilder::new()
+            .build();
+        downloader.download(&downloads).await;
+
+        let finish_message = format!("Downloaded {}.", pluralize(total_files as u64, "file"));
         Ok(())
     }
+
 }

@@ -5,24 +5,26 @@
 // There are articles, files, and projects. 
 
 use url::Url;
-use std::any;
-use std::fs::File;
 use std::fs;
-use std::path::{Path};
+use std::path::{Path,PathBuf};
 use std::io::{Read,Seek,SeekFrom};
 use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
-use std::collections::{HashSet,HashMap};
+use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 use reqwest::{Method, header::{HeaderMap, HeaderValue}};
 use reqwest::{Client, Response};
 use colored::Colorize;
+use futures_util::StreamExt;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
+#[allow(unused_imports)]
 use crate::{print_info,print_warn};
 use crate::data::{DataFile, MergedFile};
-use crate::remote::{AuthKeys, RemoteFile};
+use crate::remote::{AuthKeys, RemoteFile, DownloadInfo};
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
 
@@ -166,7 +168,7 @@ impl<'a> FigShareUpload<'a> {
                           path_context: &Path) -> Result<()> {
         let full_path = path_context.join(&data_file.path);
         let url = &upload_info.upload_url;
-        let mut file = File::open(full_path)?;
+        let mut file = fs::File::open(full_path)?;
 
         for part in &pending_upload_info.parts {
             let start_offset = part.start_offset;
@@ -215,11 +217,11 @@ impl<'a> FigShareUpload<'a> {
             } else {
                 info!("FigShare::upload() is deleting file '{}' since \
                       overwrite=true.", name);
-                self.api_instance.delete_article_file(&file);
+                self.api_instance.delete_article_file(&file).await?;
             } 
         } 
         let (upload_info, pending_upload_info) = self.init_upload(data_file).await?;
-        self.upload_parts(data_file, &upload_info, &pending_upload_info, &path_context).await?;
+        self.upload_parts(data_file, &upload_info, &pending_upload_info, path_context).await?;
         self.complete_upload(&upload_info).await?;
         Ok(())
     }
@@ -304,15 +306,18 @@ impl FigShareAPI {
         }
     }
 
+
     async fn download_file(&self, url: &str, save_path: &Path) -> Result<()> {
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
+        let response = reqwest::get(url).await?;
 
-        // read bytes from the response
-        let bytes = response.bytes().await?;
+        let total_size = response.content_length().unwrap_or(0);
+        let mut file = File::create(save_path).await?;
 
-        // write bytes to a file
-        fs::write(save_path, bytes)?;
-
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?; // handle chunk error if needed
+            file.write_all(&chunk).await?;
+        }
         Ok(())
     }
 
@@ -327,7 +332,7 @@ impl FigShareAPI {
         debug!("creating data for article: {:?}", data);
 
         // (2) issue request and parse out the article ID from location
-        let response = self.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
+        let response = self.issue_request(Method::POST, url, Some(RequestData::Json(data))).await?;
         let data = response.json::<Value>().await?;
         let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
             Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
@@ -349,9 +354,16 @@ impl FigShareAPI {
         Ok(())
     }
 
-    // Download a single file.
-    pub async fn download(&self, merged_file: &MergedFile, 
-                          path_context: &Path, overwrite: bool) -> Result<()>{
+    // Get the RemoteFile.url and combine with the token to get
+    // a private download link.
+    //
+    // Note: this is overwrite-safe: it will error out 
+    // if file exists unless overwrite is true.
+    //
+    // Note: this cannot be moved to higher-level (e.g. Remote)
+    // since each API implements authentication its own way. 
+    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) 
+        -> Result<DownloadInfo> {
         // if local DataFile is none, not in manifest; 
         // do not download
         let data_file = match &merged_file.local {
@@ -371,7 +383,18 @@ impl FigShareAPI {
 
         // add the token in
         let url = format!("{}?token={}", url, self.token);
-        self.download_file(&url, &data_file.full_path(&path_context)?).await?;
+        let save_path = &data_file.full_path(path_context)?;
+        Ok( DownloadInfo { url, path:save_path.to_string_lossy().to_string() })
+    }
+
+    // Download a single file.
+    //
+    // For the most part, this is deprecated, since we use the download manager 
+    // "trauma" now.
+    pub async fn download(&self, merged_file: &MergedFile, 
+                          path_context: &Path, overwrite: bool) -> Result<()>{
+        let info = self.get_download_info(merged_file, path_context, overwrite)?;
+        self.download_file(&info.url, &PathBuf::from(info.path)).await?;
         Ok(())
     }
 
@@ -385,7 +408,7 @@ impl FigShareAPI {
 
         let matches_found: Vec<_> = articles.iter().filter(|&a| a.title == self.name).collect();
 
-        if matches_found.len() > 0 {
+        if !matches_found.is_empty() {
             return Err(anyhow!("An existing FigShare Article with the title \
                                '{}' was found. Either delete it on figshare.com \
                                or chose a different name.", self.name));
@@ -405,16 +428,13 @@ impl FigShareAPI {
     // TODO? does this get published data sets?
     async fn get_articles(&self) -> Result<Vec<FigShareArticle>> {
         let url = "/account/articles";
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None).await?;
+        let response = self.issue_request::<HashMap<String, String>>(Method::GET, url, None).await?;
         let articles: Vec<FigShareArticle> = response.json().await?;
         Ok(articles)
     }
 
     pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
         let articles = self.get_files().await?;
-        for rf in &articles {
-            info!("FigShareFile: {:?}", rf);
-        }
         let remote_files = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
@@ -470,18 +490,4 @@ impl FigShareAPI {
         info!("deleted FigShare file '{}' (Article ID={})", file.name, article_id);
         Ok(())
     }
-}
-
-
-fn check_for_duplicate_article_titles(articles: &Vec<FigShareArticle>) -> HashSet<String> {
-    let mut titles = HashSet::new();
-    let mut duplicates = HashSet::new();
-
-    for article in articles {
-        if !titles.insert(article.title.clone()) {
-            duplicates.insert(article.title.clone());
-        }
-    }
-
-    duplicates
 }

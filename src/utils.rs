@@ -4,21 +4,19 @@ use anyhow::{anyhow,Result};
 use chrono::{Utc,Local};
 use timeago::Formatter;
 use std::path::{Path,PathBuf};
-use std::fs::{File};
+use std::fs::File;
 use std::io::Read;
-use md5::{Context};
+use md5::Context;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use colored::*;
-use unicode_width::UnicodeWidthStr;
 
-use crate::data::{StatusEntry,LocalStatusCode};
-use crate::remote::RemoteStatusCode;
-use super::remote::{Remote};
+use crate::data::StatusEntry;
+use super::remote::Remote;
 
 
 pub fn load_file(path: &PathBuf) -> String {
-    let mut file = File::open(&path).expect("unable to open file");
+    let mut file = File::open(path).expect("unable to open file");
     let mut contents = String::new();
     file.read_to_string(&mut contents).expect("unable to read file");
     contents
@@ -235,15 +233,15 @@ pub fn format_bytes(size: u64) -> String {
     let size = size as f64;
 
     if size < BYTES_IN_MB {
-        return format!("{:.2} MB", size / BYTES_IN_KB);
+        format!("{:.2} MB", size / BYTES_IN_KB)
     } else if size < BYTES_IN_GB {
-        return format!("{:.2} MB", size / BYTES_IN_MB);
+        format!("{:.2} MB", size / BYTES_IN_MB)
     } else if size < BYTES_IN_TB {
-        return format!("{:.2} GB", size / BYTES_IN_GB);
+        format!("{:.2} GB", size / BYTES_IN_GB)
     } else if size < BYTES_IN_PB {
-        return format!("{:.2} TB", size / BYTES_IN_TB);
+        format!("{:.2} TB", size / BYTES_IN_TB)
     } else {
-        return format!("{:.2} PB", size / BYTES_IN_PB);
+        format!("{:.2} PB", size / BYTES_IN_PB)
     }
 }
 
@@ -273,12 +271,12 @@ pub fn md5_status(new_md5: Option<&String>, old_md5: Option<&String>, abbrev: Op
     match (new_md5, old_md5) {
         (Some(new), Some(old)) => {
             if new == old {
-                format!("{}", shorten(&new, abbrev))
+                shorten(new, abbrev)
             } else {
-                format!("{} → {}", shorten(&old, abbrev), shorten(&new, abbrev))
+                format!("{} → {}", shorten(old, abbrev), shorten(new, abbrev))
             }
         },
-        (None, Some(old)) => format!("{}", shorten(&old, abbrev)),
+        (None, Some(old)) => shorten(old, abbrev),
         _ => "".to_string(),
     }
 }
