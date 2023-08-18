@@ -3,7 +3,7 @@ use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
 use serde::ser::SerializeMap;
-use std::thread;
+use console::style;
 use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
@@ -13,7 +13,7 @@ use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fs;
-use trauma::{download::Download, downloader::DownloaderBuilder, Error};
+use trauma::downloader::{DownloaderBuilder,StyleOptions,ProgressBarOpts};
 use colored::*;
 
 use crate::{print_warn,print_info};
@@ -718,6 +718,7 @@ impl DataCollection {
         let mut messy_skipped = Vec::new();
         let mut overwrite_skipped = Vec::new();
         let mut untracked_skipped = Vec::new();
+
         for (tracked_dir, files) in all_files.iter() {
             if let Some(remote) = self.remotes.get(tracked_dir) {
                 for merged_file in files.values() {
@@ -820,27 +821,113 @@ impl DataCollection {
         Ok(())
     }
 
+    // Download all files
+    //
+    // TODO: code redundancy with the push method's tracking of
+    // why stuff is skipped; split out info enum, etc.
     pub async fn pull(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
         let all_files = self.merge(true).await?;
 
         let mut downloads = Vec::new();
 
+        let mut current_skipped = Vec::new();
+        let mut messy_skipped = Vec::new();
+        let mut overwrite_skipped = Vec::new();
+ 
         for (dir, merged_files) in all_files.iter() {
             for merged_file in merged_files.values().filter(|f| f.can_download()) {
-                if let Some(remote) = self.remotes.get(dir) {
-                    let info = remote.get_download_info(merged_file, path_context, overwrite)?;
-                    let download = info.trauma_download()?;
-                    downloads.push(download);
+
+                let path = merged_file.name()?;
+
+                let do_download = match merged_file.status(path_context)? {
+                    RemoteStatusCode::NoLocal => {
+                        return Err(anyhow!("Internal error: execution should not have reached this point, please report."));
+                    },
+                    RemoteStatusCode::Current => {
+                        current_skipped.push(path);
+                        false
+                    },
+                    RemoteStatusCode::Exists => {
+                        // it exists on the remote, but we cannot
+                        // compare MD5s. Push only if overwrite is true.
+                        if !overwrite {
+                            overwrite_skipped.push(path);
+                        }
+                        overwrite
+                    },
+                    RemoteStatusCode::MessyLocal => {
+                        messy_skipped.push(path);
+                        false
+                    },
+                    RemoteStatusCode::Invalid => {
+                        return Err(anyhow!("A file ({:}) with RemoteStatusCode::Invalid was encountered. Please report.", path));
+                    }, 
+                    RemoteStatusCode::Different => {
+                        // TODO if remote supports modification times,
+                        // could do extra comparison here
+                        info!("skipping {:} {:}", path, overwrite);
+                        if !overwrite {
+                            overwrite_skipped.push(path);
+                        }
+                        overwrite
+                    },
+                    RemoteStatusCode::DeletedLocal => {
+                        true
+                    },
+                    RemoteStatusCode::NotExists => true
+                };
+
+                if do_download { 
+                    if let Some(remote) = self.remotes.get(dir) {
+                        let info = remote.get_download_info(merged_file, path_context, overwrite)?;
+                        let download = info.trauma_download()?;
+                        downloads.push(download);
+                    }
                 }
             }
         }
 
-        let total_files = downloads.len();
-        let downloader = DownloaderBuilder::new()
-            .build();
-        downloader.download(&downloads).await;
 
-        let finish_message = format!("Downloaded {}.", pluralize(total_files as u64, "file"));
+        let mut style_opts = StyleOptions::default();
+        style_opts.set_child(ProgressBarOpts::with_pip_style());
+
+
+        let total_files = downloads.len();
+        if !downloads.is_empty() { 
+            let downloader = DownloaderBuilder::new()
+                .style_options(style_opts)
+                .build();
+            downloader.download(&downloads).await;
+            println!("Downloaded {}.", pluralize(total_files as u64, "file"));
+        } else {
+            println!("No files downloaded.");
+        }
+
+        let num_skipped = overwrite_skipped.len() + current_skipped.len() +
+            messy_skipped.len();
+        println!("Skipped {} files. Reasons:", num_skipped);
+        if !current_skipped.is_empty() {
+            println!("  Remote file is indentical to local file: {}",
+                     pluralize(current_skipped.len() as u64, "file"));
+            for path in current_skipped {
+                println!("   - {:}", path);
+            }
+        }
+        if !overwrite_skipped.is_empty() {
+            println!("  Would overwrite (use --overwrite to push): {}", 
+                     pluralize(overwrite_skipped.len() as u64, "file"));
+            for path in overwrite_skipped {
+                println!("   - {:}", path);
+            }
+        }
+        if !messy_skipped.is_empty() {
+            println!("  Local is \"messy\" (manifest and file disagree): {}",
+            pluralize(messy_skipped.len() as u64, "file"));
+            for path in messy_skipped {
+                println!("   - {:}", path);
+            }
+        }
+
         Ok(())
     }
 
