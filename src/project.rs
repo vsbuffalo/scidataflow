@@ -13,6 +13,7 @@ use crate::utils::{load_file,print_status};
 use crate::remote::{AuthKeys,authenticate_remote};
 use crate::remote::Remote;
 use crate::figshare::FigShareAPI;
+use crate::zenodo::ZenodoAPI;
 use crate::data::LocalStatusCode;
 
 const MANIFEST: &str = "data_manifest.yml";
@@ -216,6 +217,7 @@ impl Project {
         let service = service.to_lowercase();
         let mut remote = match service.as_str() {
             "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new(name)?)),
+            "zenodo" => Ok(Remote::ZenodoAPI(ZenodoAPI::new(name)?)),
             _ => Err(anyhow!("Service '{}' is not supported!", service))
         }?;
 

@@ -24,14 +24,9 @@ use tokio::io::AsyncWriteExt;
 #[allow(unused_imports)]
 use crate::{print_info,print_warn};
 use crate::data::{DataFile, MergedFile};
-use crate::remote::{AuthKeys, RemoteFile, DownloadInfo};
+use crate::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
-
-enum RequestData<T: serde::Serialize> {
-    Json(T),
-    Binary(Vec<u8>),
-}
 
 fn figshare_api_url() -> String {
     FIGSHARE_API_URL.to_string()
@@ -239,7 +234,7 @@ impl From<FigShareFile> for RemoteFile {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct FigShareArticle {
     title: String,
     id: u64
@@ -277,27 +272,17 @@ impl FigShareAPI {
         trace!("headers: {:?}", headers);
 
         let client = Client::new();
-        let response = match data {
-            Some(RequestData::Json(json_data)) => client
-                .request(method, &full_url)
-                .headers(headers)
-                .json(&json_data)
-                .send()
-                .await?,
+        let request = client.request(method, &full_url);
 
-            Some(RequestData::Binary(bin_data)) => client
-                .request(method, &full_url)
-                .headers(headers)
-                .body(bin_data)
-                .send()
-                .await?,
-
-            None => client.request(method, &full_url)
-                .headers(headers)
-                .send()
-                .await?,
+        let request = match data {
+            Some(RequestData::Json(json_data)) => request.json(&json_data),
+            Some(RequestData::Binary(bin_data)) => request.body(bin_data),
+            Some(RequestData::File(file)) => request.body(file),
+            Some(RequestData::Empty) => request.json(&serde_json::Value::Object(serde_json::Map::new())),
+            None => request,
         };
 
+        let response = request.send().await?;
         let response_status = response.status();
         if response_status.is_success() {
             Ok(response)
@@ -364,28 +349,28 @@ impl FigShareAPI {
     // since each API implements authentication its own way. 
     pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) 
         -> Result<DownloadInfo> {
-        // if local DataFile is none, not in manifest; 
-        // do not download
-        let data_file = match &merged_file.local {
-            None => return Err(anyhow!("Cannot download() without local DataFile.")),
-            Some(file) => file
-        };
-        // check to make sure we won't overwrite
-        if data_file.is_alive(path_context) && !overwrite {
-            return Err(anyhow!("Data file '{}' exists locally, and would be \
-                               overwritten by download. Use --overwrite to download.",
-                               data_file.path));
-        }
-        // if no remote, there is nothing to download,
-        // silently return Ok. Get URL.
-        let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
-        let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
+            // if local DataFile is none, not in manifest; 
+            // do not download
+            let data_file = match &merged_file.local {
+                None => return Err(anyhow!("Cannot download() without local DataFile.")),
+                Some(file) => file
+            };
+            // check to make sure we won't overwrite
+            if data_file.is_alive(path_context) && !overwrite {
+                return Err(anyhow!("Data file '{}' exists locally, and would be \
+                                   overwritten by download. Use --overwrite to download.",
+                                   data_file.path));
+            }
+            // if no remote, there is nothing to download,
+            // silently return Ok. Get URL.
+            let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
+            let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
 
-        // add the token in
-        let url = format!("{}?token={}", url, self.token);
-        let save_path = &data_file.full_path(path_context)?;
-        Ok( DownloadInfo { url, path:save_path.to_string_lossy().to_string() })
-    }
+            // add the token in
+            let url = format!("{}?token={}", url, self.token);
+            let save_path = &data_file.full_path(path_context)?;
+            Ok( DownloadInfo { url, path:save_path.to_string_lossy().to_string() })
+        }
 
     // Download a single file.
     //
@@ -418,9 +403,9 @@ impl FigShareAPI {
         // create the new article and get the ID
         let article = self.create_article(&self.name).await?;
 
-        // (3) Set the Article ID
+        // (3) Set the Article ID, which is the only state needed
+        // for later queries
         self.article_id = Some(article.id);
-
         Ok(())
     }
 

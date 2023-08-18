@@ -11,6 +11,7 @@ pub mod data;
 pub mod traits;
 pub mod remote;
 pub mod figshare;
+pub mod zenodo;
 pub mod dryad;
 pub mod macros;
 

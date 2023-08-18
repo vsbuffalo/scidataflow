@@ -10,10 +10,12 @@ use log::{info, trace, debug};
 use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
 use crate::data::{DataFile,MergedFile};
-use crate::figshare::FigShareAPI;
+use crate::figshare::{FigShareAPI, FigShareArticle};
 use crate::dryad::DataDryadAPI;
+use crate::zenodo::ZenodoAPI;
 use trauma::{download::Download};
 use reqwest::Url;
+use crate::zenodo::ZenodoDeposition;
 
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
@@ -136,11 +138,11 @@ impl AuthKeys {
     }
 }
 
-
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Remote {
     FigShareAPI(FigShareAPI),
     DataDryadAPI(DataDryadAPI),
+    ZenodoAPI(ZenodoAPI),
 }
 
 // NOTE: these are not implemented as traits because many are async, and
@@ -150,23 +152,26 @@ impl Remote {
         match self {
             Remote::FigShareAPI(_) => "FigShare",
             Remote::DataDryadAPI(_) => "Dryad",
+            Remote::ZenodoAPI(_) => "Zenodo"
         }
     }
     // initialize the remote (i.e. tell it we have a new empty data set)
     pub async fn remote_init(&mut self) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.remote_init().await,
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init().await,
+            Remote::ZenodoAPI(znd_api) => znd_api.remote_init().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
     pub async fn get_files(&self) -> Result<Vec<RemoteFile>> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.get_remote_files().await,
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.get_remote_files().await,
+            Remote::ZenodoAPI(znd_api) => znd_api.get_remote_files().await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
     pub async fn get_files_hashmap(&self) -> Result<HashMap<String,RemoteFile>> {
-        // now we can use the common interface!
+        // now we can use the common interface! :)
         let remote_files = self.get_files().await?;
         let mut file_map: HashMap<String,RemoteFile> = HashMap::new();
         for file in remote_files.into_iter() {
@@ -176,7 +181,8 @@ impl Remote {
     }
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.upload(data_file, path_context, overwrite).await,
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.upload(data_file, path_context, overwrite).await,
+            Remote::ZenodoAPI(_) => Err(anyhow!("ZenodoAPI does not support get_project method")),
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
@@ -185,7 +191,8 @@ impl Remote {
     // Note: requires each API actually *check* overwrite.
     pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<DownloadInfo> {
         match self {
-            Remote::FigShareAPI(figshare_api) => figshare_api.get_download_info(merged_file, path_context, overwrite),
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.get_download_info(merged_file, path_context, overwrite),
+            Remote::ZenodoAPI(_) => Err(anyhow!("ZenodoAPI does not support get_project method")),
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
@@ -196,15 +203,28 @@ pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
     let auth_keys = AuthKeys::new();
     #[allow(clippy::single_match)]
     match remote {
-        Remote::FigShareAPI(ref mut figshare_api) => {
+        Remote::FigShareAPI(ref mut fgsh_api) => {
             let token = auth_keys.keys.get("figshare").cloned()
                 .ok_or_else(|| anyhow::anyhow!("Expected figshare key not found"))?;
-            figshare_api.set_token(token);
+            fgsh_api.set_token(token);
+        },
+        Remote::ZenodoAPI(ref mut znd_api) => {
+            let token = auth_keys.keys.get("zenodo").cloned()
+                .ok_or_else(|| anyhow::anyhow!("Expected figshare key not found"))?;
+            znd_api.set_token(token);
         },
         // handle other Remote variants as necessary
-        _ => {},
+        _ => Err(anyhow!("Could not find correct API in authenticate_remote()"))?
     }
     Ok(())
+}
+
+// Common enum for issue_request() methods of APIs
+pub enum RequestData<T: serde::Serialize> {
+    Json(T),
+    Binary(Vec<u8>),
+    File(tokio::fs::File),
+    Empty
 }
 
 
