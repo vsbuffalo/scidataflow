@@ -42,4 +42,5 @@ dirs = "5.0.1"
 tempfile = "3.8.0"
 rand = "0.8.5"
 flate2 = "1.0.27"
+lazy_static = "1.4.0"
 

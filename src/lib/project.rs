@@ -90,9 +90,9 @@ impl LocalMetadata {
 }
 
 pub struct Project {
-    manifest: PathBuf,
-    data: DataCollection,
-    config: Config,
+    pub manifest: PathBuf,
+    pub data: DataCollection,
+    pub config: Config,
 }
 
 impl Project {
