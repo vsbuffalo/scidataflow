@@ -11,8 +11,8 @@ use md5::Context;
 use log::{info, trace, debug};
 use colored::*;
 
-use crate::data::StatusEntry;
-use super::remote::Remote;
+use crate::lib::data::StatusEntry;
+use crate::lib::remote::Remote;
 
 
 pub fn load_file(path: &PathBuf) -> String {

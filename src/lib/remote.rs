@@ -9,15 +9,15 @@ use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::collections::HashMap;
-use serde_derive::{Serialize,Deserialize};
-use crate::data::{DataFile,MergedFile, DataCollectionMetadata};
-use crate::figshare::{FigShareAPI, FigShareArticle};
-use crate::dryad::DataDryadAPI;
-use crate::zenodo::ZenodoAPI;
 use trauma::{download::Download};
+use serde_derive::{Serialize,Deserialize};
 use reqwest::Url;
-use crate::zenodo::ZenodoDeposition;
-use crate::project::{Config, LocalMetadata};
+
+use crate::lib::data::{DataFile,MergedFile, DataCollectionMetadata};
+use crate::lib::api::figshare::{FigShareAPI, FigShareArticle};
+use crate::lib::api::dryad::DataDryadAPI;
+use crate::lib::api::zenodo::{ZenodoAPI,ZenodoDeposition};
+use crate::lib::project::{Config, LocalMetadata};
 
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";

@@ -10,8 +10,8 @@ use serde_json::Value;
 use log::{info, trace, debug};
 use std::convert::TryInto;
 
-use crate::{data::{DataFile, MergedFile}, project::LocalMetadata};
-use crate::remote::{AuthKeys,RemoteFile,DownloadInfo,RequestData};
+use crate::lib::{data::{DataFile, MergedFile}, project::LocalMetadata};
+use crate::lib::remote::{AuthKeys,RemoteFile,DownloadInfo,RequestData};
 
 
 const BASE_URL: &str = "https://zenodo.org/api/deposit/depositions";
@@ -35,7 +35,7 @@ pub struct ZenodoDeposition {
 
 
 #[derive(Debug, Deserialize)]
-struct ZenodoFile {
+pub struct ZenodoFileUpload {
     key: String,
     mimetype: String,
     checksum: String,
@@ -48,18 +48,41 @@ struct ZenodoFile {
     delete_marker: bool,
 }
 
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ZenodoFile {
+    checksum: String,
+    filename: String,
+    filesize: usize,
+    id: String,
+    links: ZenodoLinks,
+}
+
+impl From<ZenodoFile> for RemoteFile {
+    fn from(znd: ZenodoFile) -> Self {
+        RemoteFile {
+            name: znd.filename,
+            md5: Some(znd.checksum),
+            size: Some(znd.filesize as u64),
+            remote_service: "Zenodo".to_string(),
+            url: znd.links.download
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ZenodoLinks {
-    bucket: String,
-    discard: String,
-    edit: String,
-    files: String,
-    html: String,
-    latest_draft: String,
-    latest_draft_html: String,
-    publish: String,
+    download: Option<String>,
+    bucket: Option<String>,
+    discard: Option<String>,
+    edit: Option<String>,
+    files: Option<String>,
+    html: Option<String>,
+    latest_draft: Option<String>,
+    latest_draft_html: Option<String>,
+    publish: Option<String>,
     #[serde(rename = "self")]
-    self_link: String,
+    self_link: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -119,7 +142,11 @@ pub struct ZenodoAPI {
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
     token: String,
-    deposition: Option<ZenodoDeposition>
+    // Minimal info for other API operations:
+    // Note: could store the whole ZenodoDeposition but
+    // this is rather lengthy.
+    deposition_id: Option<u64>,
+    bucket_url: Option<String>,
 }
 
 impl ZenodoAPI {
@@ -129,7 +156,8 @@ impl ZenodoAPI {
         Ok(ZenodoAPI { 
             name, 
             token,
-            deposition: None
+            deposition_id: None,
+            bucket_url: None
         })
     }
 
@@ -191,30 +219,31 @@ impl ZenodoAPI {
         let data = Some(RequestData::Json(metadata));
         let response = self.issue_request(Method::POST, BASE_URL, Some(headers), data).await?;
         let info: ZenodoDeposition = response.json().await?;
-        self.deposition = Some(info);
+        self.deposition_id = Some(info.id as u64);
+        self.bucket_url = info.links.bucket;
         Ok(())
     }
 
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
-        let bucket_url = ""; //self.bucket_url;
+        let bucket_url = self.bucket_url.as_ref().ok_or(anyhow!("Internal Error: Zenodo bucket_url not set."))?;
         let full_path = path_context.join(&data_file.path);
         let file = tokio::fs::File::open(full_path).await?;
         let response = self.issue_request::<HashMap<String, String>>(Method::PUT, &bucket_url, None, Some(RequestData::File(file))).await?;
-        let info: ZenodoFile = response.json().await?;
+        let info: ZenodoFileUpload = response.json().await?;
         Ok(())
     }
 
-    pub async fn get_files(&self) -> Result<()> {
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, BASE_URL, None, None).await?;
-        println!("{:?}", response);
-        //let upload_info: ZenodoDeposition = response.json().await?;
-        Ok(())
+    pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
+        let id = self.deposition_id.ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))?;
+        let url = format!("{}/{}/files", BASE_URL, id);
+        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None, None).await?;
+        let files: Vec<ZenodoFile> = response.json().await?;
+        Ok(files)
     }
 
     pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
         let articles = self.get_files().await?;
-        //let remote_files = articles.into_iter().map(RemoteFile::from).collect();
-        let remote_files: Vec<RemoteFile> = Vec::new();
+        let remote_files:Vec<RemoteFile> = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
 }

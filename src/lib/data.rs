@@ -17,8 +17,8 @@ use trauma::downloader::{DownloaderBuilder,StyleOptions,ProgressBarOpts};
 use colored::*;
 
 use crate::{print_warn,print_info};
-use crate::utils::{format_mod_time,compute_md5, md5_status,pluralize};
-use crate::remote::{authenticate_remote,Remote,RemoteFile,RemoteStatusCode};
+use crate::lib::utils::{format_mod_time,compute_md5, md5_status,pluralize};
+use crate::lib::remote::{authenticate_remote,Remote,RemoteFile,RemoteStatusCode};
 
 // The status of a local data file, *conditioned* on it being in the manifest.
 #[derive(Debug,PartialEq,Clone)]

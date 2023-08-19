@@ -1,19 +1,10 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
-use crate::project::Project;
 use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 
-pub mod utils;
-pub mod project;
-pub mod data;
-pub mod traits;
-pub mod remote;
-pub mod figshare;
-pub mod zenodo;
-pub mod dryad;
-pub mod macros;
+use sciflow::lib::project::Project;
 
 const INFO: &str = "\
 SciFlow: Manage and Share Scientific Data

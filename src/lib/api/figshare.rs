@@ -23,9 +23,9 @@ use tokio::io::AsyncWriteExt;
 
 #[allow(unused_imports)]
 use crate::{print_info,print_warn};
-use crate::data::{DataFile, MergedFile};
-use crate::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
-use crate::project::LocalMetadata;
+use crate::lib::data::{DataFile, MergedFile};
+use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
+use crate::lib::project::LocalMetadata;
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
 

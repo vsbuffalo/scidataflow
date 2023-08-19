@@ -2,6 +2,15 @@
 name = "sciflow"
 version = "0.1.0"
 edition = "2021"
+include = ["src/**/*", "tests/test_data/**/*"]
+
+[lib]
+name = "sciflow"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scf"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -30,4 +39,7 @@ pbr = "1.1.1"
 trauma = "2.2.3"
 console = "0.15.7"
 dirs = "5.0.1"
+tempfile = "3.8.0"
+rand = "0.8.5"
+flate2 = "1.0.27"
 

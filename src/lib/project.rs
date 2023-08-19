@@ -11,13 +11,13 @@ use dirs;
 
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
-use crate::data::{DataFile,DataCollection,DataCollectionMetadata};
-use crate::utils::{load_file,print_status};
-use crate::remote::{AuthKeys,authenticate_remote};
-use crate::remote::Remote;
-use crate::figshare::FigShareAPI;
-use crate::zenodo::ZenodoAPI;
-use crate::data::LocalStatusCode;
+use crate::lib::data::{DataFile,DataCollection,DataCollectionMetadata};
+use crate::lib::utils::{load_file,print_status};
+use crate::lib::remote::{AuthKeys,authenticate_remote};
+use crate::lib::remote::Remote;
+use crate::lib::api::figshare::FigShareAPI;
+use crate::lib::api::zenodo::ZenodoAPI;
+use crate::lib::data::LocalStatusCode;
 
 const MANIFEST: &str = "data_manifest.yml";
 
