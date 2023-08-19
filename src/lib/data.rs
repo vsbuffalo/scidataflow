@@ -29,7 +29,7 @@ pub enum LocalStatusCode {
     Invalid      // Invalid state
 }
 
-#[derive(Clone)]
+#[derive(Debug,Clone)]
 pub struct StatusEntry {
     pub name: String,
     pub local_status: Option<LocalStatusCode>,
@@ -673,6 +673,8 @@ impl DataCollection {
 
 
     // Get the status of the DataCollection, optionally with remotes.
+    // 
+    // Organized by directory
     pub async fn status(&mut self, path_context: &Path, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
         // get all merged files, used to compute the status
         let merged_files = self.merge(include_remotes).await?;

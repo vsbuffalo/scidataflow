@@ -8,6 +8,7 @@ use rand::Rng;
 use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::Write;
+use std::collections::{BTreeMap};
 use tempfile::TempDir;
 use serde_derive::{Deserialize, Serialize};
 use serde_yaml;
@@ -18,11 +19,39 @@ use std::fs::create_dir_all;
 use std::sync::Once;
 use lazy_static::lazy_static;
 
-
-
 use sciflow::lib::project::Project;
+use sciflow::lib::data::StatusEntry;
 
-const CONFIG_YAML: &str = include_str!("../test_data/project_structure.yaml");
+pub fn make_mock_fixtures() -> Vec<DataFileFixture> { 
+    let files = vec![
+        DataFileFixture {
+            path: "data/data.tsv".to_string(),
+            size: 5,
+            add: true,
+            track: false,
+        },
+        DataFileFixture {
+            path: "data/supplement/big_1.tsv.gz".to_string(),
+            size: 50,
+            add: true,
+            track: true,
+        },
+        DataFileFixture {
+            path: "data/supplement/big_2.tsv.gz".to_string(),
+            size: 10,
+            add: true,
+            track: true,
+        },
+        DataFileFixture {
+            path: "data/raw/medium.tsv.gz".to_string(),
+            size: 10,
+            add: true,
+            track: true,
+        },
+        ];
+    files
+}
+
 
 fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool) -> Result<()> {
     let file = File::create(file_path)?;
@@ -49,10 +78,8 @@ fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool) -> Result<()> 
 }
 
 
-fn generate_directory_structure(config: &DirectoryConfig, base_path: &Path, cache_dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
-
-    for data_file_fixture in &config.files {
+fn generate_directory_structure(data_fixtures: &Vec<DataFileFixture>, base_path: &Path, cache_dir: &Path) -> Result<()> {
+    for data_file_fixture in data_fixtures {
         let file_path = base_path.join(&data_file_fixture.path);
         let directory_path = file_path.parent().unwrap();
         create_dir_all(directory_path)?;
@@ -65,18 +92,12 @@ fn generate_directory_structure(config: &DirectoryConfig, base_path: &Path, cach
             std::fs::copy(&cached_file_path, &file_path)?;
         } else {
             let is_gzip = file_path.extension().map_or(false, |ext| ext == "gz");
-            let size_in_bytes = data_file_fixture.size * 1_048_576;
+            let size_in_bytes = data_file_fixture.size * 1_000_000;
             generate_random_tsv(&file_path, size_in_bytes, is_gzip)?;
             std::fs::copy(&file_path, &cached_file_path)?; // Now this should work
         }
-        paths.push(file_path.clone());
     }
-    Ok(paths)
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct DirectoryConfig {
-    files: Vec<DataFileFixture>,
+    Ok(())
 }
 
 pub struct TestEnvironment {
@@ -84,7 +105,7 @@ pub struct TestEnvironment {
     pub temp_dir: TempDir,
     pub main_dir: PathBuf,
     pub cache_dir: PathBuf,
-    pub files: Option<Vec<PathBuf>>
+    pub files: Option<Vec<DataFileFixture>>
 }
 
 pub struct TestFixture {
@@ -93,10 +114,13 @@ pub struct TestFixture {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct DataFileFixture {
-    path: String,
-    size: usize, // size in bytes
+pub struct DataFileFixture {
+    pub path: String,
+    pub size: usize, // size in megabytes
+    pub add: bool,
+    pub track: bool,
 }
+
 
 impl TestEnvironment {
     // Create a new TestEnvironment
@@ -120,11 +144,9 @@ impl TestEnvironment {
         })
     }
 
-    pub fn build_project_directories(&mut self, yaml_config: &str) -> Result<()> {
-        let config: DirectoryConfig = serde_yaml::from_str(&yaml_config).unwrap();
-        info!("config: {:?}", config);
-        let files = generate_directory_structure(&config, &self.temp_dir.path(), &self.cache_dir)?;
-        self.files = Some(files);
+    pub fn build_project_directories(&mut self, data_fixtures: Vec<DataFileFixture>) -> Result<()> {
+        generate_directory_structure(&data_fixtures, &self.temp_dir.path(), &self.cache_dir)?;
+        self.files = Some(data_fixtures);
         Ok(())
     }
 
@@ -133,7 +155,6 @@ impl TestEnvironment {
     }
 
 }
-
 
 pub fn read_keep_temp() -> bool {
     return env::var("KEEP_TEMP_DIR").is_ok()
@@ -157,7 +178,8 @@ pub fn setup() -> TestFixture {
 
     let project_name = "test_project".to_string();
     let mut test_env = TestEnvironment::new(&project_name).expect("Error creating test environment.");
-    let _ = test_env.build_project_directories(CONFIG_YAML);
+    let data_fixtures = make_mock_fixtures();
+    let _ = test_env.build_project_directories(data_fixtures);
 
     // initializes sciflow in the test environment
     let _ = Project::init(Some(project_name));
@@ -167,5 +189,16 @@ pub fn setup() -> TestFixture {
 }
 
 
+pub fn iter_status_entries<'a>(
+    statuses: &'a BTreeMap<String, Vec<StatusEntry>>,
+) -> impl Iterator<Item = (PathBuf, &'a StatusEntry)> + 'a {
+    statuses.iter().flat_map(|(dir, entries)| {
+        entries.iter().map(move |status| {
+            let mut path = PathBuf::from(dir);
+            path.push(&status.name);
+            (path, status)
+        })
+    })
+}
 
 
