@@ -8,8 +8,9 @@ use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
+use std::convert::TryInto;
 
-use crate::data::{DataFile, MergedFile};
+use crate::{data::{DataFile, MergedFile}, project::LocalMetadata};
 use crate::remote::{AuthKeys,RemoteFile,DownloadInfo,RequestData};
 
 
@@ -19,10 +20,11 @@ const BASE_URL: &str = "https://zenodo.org/api/deposit/depositions";
 pub struct ZenodoDeposition {
     conceptrecid: String,
     created: String,
+    #[serde(skip_deserializing)]
     files: Vec<String>,
     id: u32,
     links: ZenodoLinks,
-    metadata: Metadata,
+    metadata: ZenodoMetadata,
     modified: String,
     owner: u32,
     record_id: u32,
@@ -61,14 +63,55 @@ pub struct ZenodoLinks {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct Metadata {
-    prereserve_doi: PrereserveDoi,
+struct Creator {
+    name: String,
+    affiliation: Option<String>
+}
+
+// We need this wrapper to provide the metadata
+// for the Zenodo Deposition.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct ZenodoDepositionData {
+    metadata: ZenodoMetadata,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct ZenodoMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prereserve_doi: Option<PrereserveDoi>,
+    title: String,
+    upload_type: Option<String>,
+    description: Option<String>,
+    creators: Option<Vec<Creator>>,
+}
+
+impl TryInto<ZenodoDepositionData> for LocalMetadata {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<ZenodoDepositionData> {
+        let name = self.author_name.ok_or_else(|| anyhow!("Author name is required"))?;
+        // TODO? Warn user of default description?
+        let description = self.description.unwrap_or("Upload by SciFlow.".to_string());
+
+        Ok(ZenodoDepositionData {
+            metadata: ZenodoMetadata {
+                prereserve_doi: None,
+                title: self.title.ok_or(anyhow!("Zenodo requires a title be set."))?,
+                upload_type: Some("dataset".to_string()),
+                description: Some(description),
+                creators: Some(vec![Creator {
+                    name,
+                    affiliation: self.affiliation,
+                }]),
+            },
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct PrereserveDoi {
     doi: String,
-    recid: u32,
+    recid: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -98,18 +141,24 @@ impl ZenodoAPI {
     // TODO: this is the same as FigShareAPI's issue_request().
     // Since APIs can have different authentication routines, we
     // should handle that part separately.
-    async fn issue_request<T: serde::Serialize>(&self, method: Method, url: &str,
-                                                headers: Option<HeaderMap>,
-                                                data: Option<RequestData<T>>) -> Result<Response> {
+    async fn issue_request<T: serde::Serialize + std::fmt::Debug>(&self, method: Method, url: &str,
+                                                                  headers: Option<HeaderMap>,
+                                                                  data: Option<RequestData<T>>) -> Result<Response> {
         assert!(url.starts_with("https://"));
         let url = format!("{}?access_token={}", url, self.token);
         trace!("request URL: {:?}", &url);
 
         let client = Client::new();
         let mut request = client.request(method, &url);
+        info!("request: {:?}", request);
         if let Some(h) = headers {
             info!("Request Headers: {:?}", h);
             request = request.headers(h);
+        }
+
+        if let Some(data) = &data { // Use the cloned data for logging
+            let data_clone = data.clone(); // Clone the data
+            info!("Request Data: {:?}", data_clone);
         }
 
         let request = match data {
@@ -130,18 +179,24 @@ impl ZenodoAPI {
         }
     }
 
-    pub async fn remote_init(&mut self) -> Result<()> {
+
+    // Initialize the data collection on the Remote
+    //
+    // For Zenodo, this creates a new "deposition"
+    #[allow(unused)]
+    pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let response = self.issue_request::<HashMap<String, String>>(Method::POST, BASE_URL, Some(headers), Some(RequestData::Empty)).await?;
-        println!("{:?}", response);
+        let metadata: ZenodoDepositionData = local_metadata.try_into()?;
+        let data = Some(RequestData::Json(metadata));
+        let response = self.issue_request(Method::POST, BASE_URL, Some(headers), data).await?;
         let info: ZenodoDeposition = response.json().await?;
         self.deposition = Some(info);
         Ok(())
     }
 
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
-        let bucket_url = self.bucket_url;
+        let bucket_url = ""; //self.bucket_url;
         let full_path = path_context.join(&data_file.path);
         let file = tokio::fs::File::open(full_path).await?;
         let response = self.issue_request::<HashMap<String, String>>(Method::PUT, &bucket_url, None, Some(RequestData::File(file))).await?;

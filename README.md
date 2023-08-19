@@ -1,4 +1,10 @@
-# SciFlow
+# SciFlow -- Facilitating the Flow of Data in Science
+
+SciFlow is a both (1) a minimal specification of the data used in a scientific
+project and (2) a fast, concurrent command line tool to retrieve and upload
+scientific data from multiple repositories (e.g. FigShare, Zenodo, etc.).
+
+## Philosophy 
 
 There is a fundamental other valuable asset in modern science other than that
 paper. It is a reproducible, reusable set of project data.

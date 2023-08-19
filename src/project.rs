@@ -1,14 +1,17 @@
 use std::fs::{File,metadata,canonicalize};
-use anyhow::{anyhow,Result};
-use std::{env};
+use anyhow::{anyhow,Result,Context};
+use serde_yaml;
+use serde_derive::{Serialize,Deserialize};
+use std::env;
 use std::path::{Path,PathBuf};
+use std::io::{Read, Write};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
-use std::io::{Write};
+use dirs;
 
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
-use crate::data::{DataFile,DataCollection};
+use crate::data::{DataFile,DataCollection,DataCollectionMetadata};
 use crate::utils::{load_file,print_status};
 use crate::remote::{AuthKeys,authenticate_remote};
 use crate::remote::Remote;
@@ -19,7 +22,7 @@ use crate::data::LocalStatusCode;
 const MANIFEST: &str = "data_manifest.yml";
 
 
-pub fn find_config(start_dir: Option<&PathBuf>, filename: &str) -> Option<PathBuf> {
+pub fn find_manifest(start_dir: Option<&PathBuf>, filename: &str) -> Option<PathBuf> {
     let mut current_dir = match start_dir {
         Some(dir) => dir.to_path_buf(),
         None => env::current_dir().expect("Failed to get current directory")
@@ -39,45 +42,148 @@ pub fn find_config(start_dir: Option<&PathBuf>, filename: &str) -> Option<PathBu
     }
 }
 
-pub struct Project {
-    manifest: PathBuf,
-    data: DataCollection
+pub fn config_path() -> Result<PathBuf> {
+    let mut config_path: PathBuf = dirs::home_dir()
+        .ok_or_else(|| anyhow!("Cannot load home directory!"))?;
+    config_path.push(".sciflow_config");
+    Ok(config_path)
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct User {
+    pub name: String,
+    pub email: Option<String>,
+    pub affiliation: Option<String>,
 }
 
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct Config {
+    user: User
+}
+
+
+// Metadata about *local* project
+//
+// The idea of this is to extract the parts of the metadata
+// that Remote.remote_init() can access, so we can pass
+// a single object to Remote.remote_init(). E.g. includes
+// User and DataCollectionMetadata.
+pub struct LocalMetadata {
+    pub author_name: Option<String>,
+    pub email: Option<String>,
+    pub affiliation: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>
+}
+
+impl LocalMetadata {
+    pub fn from_project(project: &Project) -> Self {
+        LocalMetadata {
+            author_name: Some(project.config.user.name.clone()),
+            email: project.config.user.email.clone(),
+            affiliation: project.config.user.affiliation.clone(),
+            title: project.data.metadata.title.clone(),
+            description: project.data.metadata.description.clone()
+        }
+    }
+}
+
+pub struct Project {
+    manifest: PathBuf,
+    data: DataCollection,
+    config: Config,
+}
+
 impl Project {
-    fn get_manifest() -> PathBuf {
-        find_config(None, MANIFEST)
-            .expect("SciFlow not initialized.")
+    fn get_manifest() -> Result<PathBuf> {
+        find_manifest(None, MANIFEST).ok_or(anyhow!("SciFlow not initialized."))
+    }
+
+    pub fn load_config() -> Result<Config> {
+        let config_path = config_path()?;
+        let mut file = File::open(&config_path)
+            .with_context(|| format!("No sciflow config found at \
+                                     {:?}. Please set with scf config --user <NAME> \
+                                     [--email <EMAIL> --affil <AFFILIATION>]", &config_path))?;
+                                     let mut contents = String::new();
+                                     file.read_to_string(&mut contents)?;
+
+                                     let config: Config = serde_yaml::from_str(&contents)?;
+                                     Ok(config)
+    }
+
+    pub fn save_config(config: Config) -> Result<()> {
+        let config_path = config_path()?;
+        let serialized_config = serde_yaml::to_string(&config)?;
+        std::fs::write(config_path, serialized_config)
+            .with_context(|| "Failed to write the configuration to file")?;
+        Ok(())
     }
 
     pub fn new() -> Result<Self> {
-        let manifest = Project::get_manifest();
+        let manifest = Project::get_manifest()?;
+        info!("manifest: {:?}", manifest);
         let data = Project::load(&manifest)?;
-        let proj = Project { manifest, data };
+        let config = Project::load_config()?;
+        let proj = Project { manifest, data, config };
         Ok(proj)
     }
 
-    pub fn name(&self) -> String {
-        self.manifest
-            .parent()
+    fn get_parent_dir(file: &Path) -> String {
+        file.parent()
             .and_then(|path| path.file_name())
             .map(|os_str| os_str.to_string_lossy().into_owned())
             .unwrap_or_else(|| panic!("invalid project location: is it in root?"))
+
     }
 
-    pub fn init() -> Result<()> {
+    pub fn name(&self) -> String {
+        Project::get_parent_dir(&self.manifest)
+    }
+
+    pub fn init(name: Option<String>) -> Result<()> {
         // the new manifest should be in the present directory
         let manifest: PathBuf = PathBuf::from(MANIFEST);
-        let found_manifest = find_config(None, MANIFEST);
-        if manifest.exists() || found_manifest.is_none() {
+        if manifest.exists() {
             return Err(anyhow!("Project already initialized. Manifest file already exists."));
         } else {
-            let data = DataCollection::new();
-            let proj = Project { manifest, data };
+            // TODO could pass metadata parameters here
+            let mut data = DataCollection::new();
+            if let Some(name) = name {
+                data.metadata.title = Some(name);
+            }
+            let config = Project::load_config()?;
+            let proj = Project { manifest, data, config };
             // save to create the manifest
             proj.save()?;
+
         }
+        Ok(())
+    }
+
+    pub fn set_config(name: &Option<String>, email: &Option<String>, affiliation: &Option<String>) -> Result<()> {
+        let mut config = Project::load_config().unwrap_or_else(|_| Config {
+            user: User {
+                name: "".to_string(),
+                email: None,
+                affiliation: None,
+            }
+        });
+        info!("read config: {:?}", config);
+        if let Some(new_name) = name {
+            config.user.name = new_name.to_string();
+        }
+        if let Some(new_email) = email {
+            config.user.email = Some(new_email.to_string());
+        }
+        if let Some(new_affiliation) = affiliation {
+            config.user.affiliation = Some(new_affiliation.to_string());
+        }
+        if config.user.name.is_empty() {
+            return Err(anyhow!("Config 'name' not set, and cannot be empty."));
+        }
+        Project::save_config(config)?;
         Ok(())
     }
 
@@ -102,7 +208,7 @@ impl Project {
 
         if contents.trim().is_empty() {
             // empty manifest, just create a new one
-            return Ok(DataCollection::new());
+            return Err(anyhow!("No 'data_manifest.yml' found, has sdf init been run?"));
         }
 
         let data = serde_yaml::from_str(&contents)?;
@@ -158,24 +264,24 @@ impl Project {
         }
         Ok(true)
     }
-/*
-    pub fn stats(&self) -> Result<()> {
-        let mut rows: Vec<StatusEntry> = Vec::new();
-        for (key, data_file) in self.data.files.iter() {
-            let size = format_bytes(data_file.get_size(&self.path_context())?);
-            let cols = vec![key.clone(), size];
-            // TODO use different more general struct?
-            // Or print_fixed_width should be a trait?
-            let entry = StatusEntry {
-                local_status: LocalStatusCode::Invalid, 
-                remote_status: RemoteStatusCode::NotExists,
-                tracked: Some(false),
-                remote_service: None,
-                cols: Some(cols) };
-            rows.push(entry);
-        }
-        print_status(rows, None);
-        Ok(())
+    /*
+       pub fn stats(&self) -> Result<()> {
+       let mut rows: Vec<StatusEntry> = Vec::new();
+       for (key, data_file) in self.data.files.iter() {
+       let size = format_bytes(data_file.get_size(&self.path_context())?);
+       let cols = vec![key.clone(), size];
+    // TODO use different more general struct?
+    // Or print_fixed_width should be a trait?
+    let entry = StatusEntry {
+    local_status: LocalStatusCode::Invalid, 
+    remote_status: RemoteStatusCode::NotExists,
+    tracked: Some(false),
+    remote_service: None,
+    cols: Some(cols) };
+    rows.push(entry);
+    }
+    print_status(rows, None);
+    Ok(())
     } */
 
 
@@ -235,7 +341,9 @@ impl Project {
         // checks that the article doesn't exist (error if it
         // does), creates it, and sets the FigShare.article_id 
         // once it is assigned by the remote).
-        remote.remote_init().await?;
+        // Note: we pass the Project to remote_init
+        let local_metadata = LocalMetadata::from_project(self);
+        remote.remote_init(local_metadata).await?;
 
         // (6) register the remote in the manifest
         self.data.register_remote(&dir, remote)?;

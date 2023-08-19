@@ -25,6 +25,7 @@ use tokio::io::AsyncWriteExt;
 use crate::{print_info,print_warn};
 use crate::data::{DataFile, MergedFile};
 use crate::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
+use crate::project::LocalMetadata;
 
 const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
 
@@ -268,11 +269,12 @@ impl FigShareAPI {
 
         trace!("request URL: {:?}", full_url);
 
+        let client = Client::new();
+        let mut request = client.request(method, &full_url);
+
         headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
         trace!("headers: {:?}", headers);
-
-        let client = Client::new();
-        let request = client.request(method, &full_url);
+        request = request.headers(headers);
 
         let request = match data {
             Some(RequestData::Json(json_data)) => request.json(&json_data),
@@ -386,7 +388,8 @@ impl FigShareAPI {
     // FigShare Remote initialization
     // 
     // This creates a FigShare article for the tracked directory.
-    pub async fn remote_init(&mut self) -> Result<()> {
+    #[allow(unused)]
+    pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
         // (1) Let's make sure there is no Article that exists
         // with this same name
         let articles = self.get_articles().await?;

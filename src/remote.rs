@@ -1,3 +1,4 @@
+use log::Metadata;
 use serde_yaml;
 use std::fs;
 use std::fs::File;
@@ -9,13 +10,14 @@ use anyhow::{anyhow,Result};
 use log::{info, trace, debug};
 use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
-use crate::data::{DataFile,MergedFile};
+use crate::data::{DataFile,MergedFile, DataCollectionMetadata};
 use crate::figshare::{FigShareAPI, FigShareArticle};
 use crate::dryad::DataDryadAPI;
 use crate::zenodo::ZenodoAPI;
 use trauma::{download::Download};
 use reqwest::Url;
 use crate::zenodo::ZenodoDeposition;
+use crate::project::{Config, LocalMetadata};
 
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";
@@ -156,10 +158,10 @@ impl Remote {
         }
     }
     // initialize the remote (i.e. tell it we have a new empty data set)
-    pub async fn remote_init(&mut self) -> Result<()> {
+    pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
         match self {
-            Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init().await,
-            Remote::ZenodoAPI(znd_api) => znd_api.remote_init().await,
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init(local_metadata).await,
+            Remote::ZenodoAPI(znd_api) => znd_api.remote_init(local_metadata).await,
             Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
         }
     }
@@ -220,6 +222,7 @@ pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
 }
 
 // Common enum for issue_request() methods of APIs
+#[derive(Debug)]
 pub enum RequestData<T: serde::Serialize> {
     Json(T),
     Binary(Vec<u8>),

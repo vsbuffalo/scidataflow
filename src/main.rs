@@ -59,10 +59,24 @@ enum Commands {
         #[structopt(name = "filenames", required = true)]
         filenames: Vec<String>,
     },
-
+     #[structopt(name = "config")]
+    /// Set local configuration settings (e.g. name), which 
+    /// can be propagated to some APIs.
+    Config {
+        /// Your name (required if not previously set)
+        #[structopt(long)]
+        name: Option<String>,
+        #[structopt(long)]
+        email: Option<String>,
+        #[structopt(long)]
+        affiliation: Option<String>,
+    },
     #[structopt(name = "init")]
     /// Initialize a new project.
     Init {
+        /// project name (default: the name of the directory)
+        #[structopt(long)]
+        name: Option<String>
     },
 
     #[structopt(name = "status")]
@@ -166,8 +180,11 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.add(filenames)
         }
-        Some(Commands::Init {  }) => {
-            Project::init()
+        Some(Commands::Config { name, email, affiliation }) => {
+            Project::set_config(name, email, affiliation)
+        }
+        Some(Commands::Init { name }) => {
+            Project::init(name.clone())
         }
         Some(Commands::Status { remotes }) => {
             let mut proj = Project::new()?;

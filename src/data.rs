@@ -440,6 +440,12 @@ S: serde::ser::Serializer,
     map.end()
 }
 
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct DataCollectionMetadata {
+    pub title: Option<String>,
+    pub description: Option<String>,
+}
+
 /// DataCollection structure for managing the data manifest 
 /// and how it talks to the outside world.
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -448,6 +454,7 @@ pub struct DataCollection {
     pub files: HashMap<String, DataFile>,
     #[serde(serialize_with = "ordered_map")]
     pub remotes: HashMap<String, Remote>, // key is tracked directory
+    pub metadata: DataCollectionMetadata,
 }
 
 /// DataCollection methods: these should *only* be for 
@@ -457,6 +464,7 @@ impl DataCollection {
         Self {
             files: HashMap::new(),
             remotes: HashMap::new(),
+            metadata: DataCollectionMetadata::default()
         }
     }
 
