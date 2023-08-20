@@ -11,7 +11,7 @@ use dirs;
 
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
-use crate::lib::data::{DataFile,DataCollection,DataCollectionMetadata};
+use crate::lib::data::{DataFile,DataCollection};
 use crate::lib::utils::{load_file,print_status};
 use crate::lib::remote::{AuthKeys,authenticate_remote};
 use crate::lib::remote::Remote;

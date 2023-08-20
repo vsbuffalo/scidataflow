@@ -8,15 +8,16 @@ use rand::Rng;
 use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::Write;
-use std::collections::{BTreeMap};
+use std::collections::{BTreeMap,HashMap};
 use tempfile::TempDir;
 use serde_derive::{Deserialize, Serialize};
-use serde_yaml;
 use std::io::BufWriter;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::fs::create_dir_all;
 use std::sync::Once;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use lazy_static::lazy_static;
 
 use sciflow::lib::project::Project;
@@ -53,7 +54,12 @@ pub fn make_mock_fixtures() -> Vec<DataFileFixture> {
 }
 
 
-fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool) -> Result<()> {
+fn create_seeded_rng() -> StdRng {
+    let seed = 0;
+    StdRng::seed_from_u64(seed)
+}
+
+pub fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool, rng: &mut StdRng) -> Result<()> {
     let file = File::create(file_path)?;
     let writer: Box<dyn Write> = if gzip {
         Box::new(GzEncoder::new(file, Compression::default()))
@@ -62,8 +68,7 @@ fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool) -> Result<()> 
     };
     let mut writer = BufWriter::new(writer);
 
-    let mut rng = rand::thread_rng();
-    let mut bytes_written = 0; // Track the number of bytes written
+    let mut bytes_written = 0;
 
     while bytes_written < size {
         let value: u32 = rng.gen();
@@ -71,14 +76,13 @@ fn generate_random_tsv(file_path: &Path, size: usize, gzip: bool) -> Result<()> 
         bytes_written += line.len();
         writer.write_all(line.as_bytes())?;
     }
-
-    writer.flush()?; // Ensure all data is written to the writer
-
+    writer.flush()?;
     Ok(())
 }
 
 
-fn generate_directory_structure(data_fixtures: &Vec<DataFileFixture>, base_path: &Path, cache_dir: &Path) -> Result<()> {
+fn generate_directory_structure(data_fixtures: &Vec<DataFileFixture>, base_path: &Path, 
+                                cache_dir: &Path, rng: &mut StdRng) -> Result<()> {
     for data_file_fixture in data_fixtures {
         let file_path = base_path.join(&data_file_fixture.path);
         let directory_path = file_path.parent().unwrap();
@@ -93,7 +97,7 @@ fn generate_directory_structure(data_fixtures: &Vec<DataFileFixture>, base_path:
         } else {
             let is_gzip = file_path.extension().map_or(false, |ext| ext == "gz");
             let size_in_bytes = data_file_fixture.size * 1_000_000;
-            generate_random_tsv(&file_path, size_in_bytes, is_gzip)?;
+            generate_random_tsv(&file_path, size_in_bytes, is_gzip, rng)?;
             std::fs::copy(&file_path, &cached_file_path)?; // Now this should work
         }
     }
@@ -105,7 +109,8 @@ pub struct TestEnvironment {
     pub temp_dir: TempDir,
     pub main_dir: PathBuf,
     pub cache_dir: PathBuf,
-    pub files: Option<Vec<DataFileFixture>>
+    pub files: Option<Vec<DataFileFixture>>,
+    pub rng: StdRng
 }
 
 pub struct TestFixture {
@@ -135,17 +140,19 @@ impl TestEnvironment {
 
         info!("temp_dir: {:?}", temp_dir);
 
+        let rng = create_seeded_rng();
         Ok(Self {
             name: name.to_string(),
             temp_dir,
             main_dir: pwd,
             cache_dir,
             files: None,
+            rng
         })
     }
 
     pub fn build_project_directories(&mut self, data_fixtures: Vec<DataFileFixture>) -> Result<()> {
-        generate_directory_structure(&data_fixtures, &self.temp_dir.path(), &self.cache_dir)?;
+        generate_directory_structure(&data_fixtures, &self.temp_dir.path(), &self.cache_dir, &mut self.rng)?;
         self.files = Some(data_fixtures);
         Ok(())
     }
@@ -156,6 +163,7 @@ impl TestEnvironment {
 
 }
 
+#[allow(dead_code)]  // will implement later
 pub fn read_keep_temp() -> bool {
     return env::var("KEEP_TEMP_DIR").is_ok()
 }
@@ -167,7 +175,7 @@ impl Drop for TestEnvironment {
     }
 }
 
-pub fn setup() -> TestFixture {
+pub fn setup(do_add: bool) -> TestFixture {
     lazy_static! {
         static ref INIT_LOGGING: Once = Once::new();
     }
@@ -183,7 +191,21 @@ pub fn setup() -> TestFixture {
 
     // initializes sciflow in the test environment
     let _ = Project::init(Some(project_name));
-    let project = Project::new().expect("setting up TestFixture failed");
+    let mut project = Project::new().expect("setting up TestFixture failed");
+
+    if do_add {
+        // add the files that should be added (e.g. a setup further 
+        // in setting up the mock project)
+        // get the files to add
+        let files = &test_env.files.as_ref().unwrap();
+        let add_files: Vec<String> = files.into_iter()
+            .filter(|f| f.add)
+            .map(|f| f.path.clone())
+            .collect();
+
+        // add those files
+        let _ = project.add(&add_files);
+    }
 
     TestFixture { env: test_env, project }
 }
@@ -191,7 +213,7 @@ pub fn setup() -> TestFixture {
 
 pub fn iter_status_entries<'a>(
     statuses: &'a BTreeMap<String, Vec<StatusEntry>>,
-) -> impl Iterator<Item = (PathBuf, &'a StatusEntry)> + 'a {
+    ) -> impl Iterator<Item = (PathBuf, &'a StatusEntry)> + 'a {
     statuses.iter().flat_map(|(dir, entries)| {
         entries.iter().map(move |status| {
             let mut path = PathBuf::from(dir);
@@ -201,4 +223,17 @@ pub fn iter_status_entries<'a>(
     })
 }
 
+pub async fn get_statuses(fixture: &mut TestFixture, path_context: &Path) -> Vec<(PathBuf,StatusEntry)> {
+    let statuses = fixture.project.data
+        .status(&path_context, false).await
+        .expect("Error in getting statuses.");
+    iter_status_entries(&statuses).map(|(path, status)| (path, status.clone())).collect()
+}
 
+
+pub async fn get_statuses_map(fixture: &mut TestFixture, path_context: &Path) -> HashMap<PathBuf, StatusEntry> {
+    let statuses = fixture.project.data
+        .status(&path_context, false).await
+        .expect("Error in getting statuses.");
+    iter_status_entries(&statuses).map(|(path, status)| (path, status.clone())).collect()
+}

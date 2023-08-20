@@ -294,12 +294,10 @@ impl FigShareAPI {
     }
 
 
+    // Download a single file through the FigShare API
     async fn download_file(&self, url: &str, save_path: &Path) -> Result<()> {
         let response = reqwest::get(url).await?;
-
-        let total_size = response.content_length().unwrap_or(0);
         let mut file = File::create(save_path).await?;
-
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?; // handle chunk error if needed

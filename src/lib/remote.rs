@@ -1,4 +1,3 @@
-use log::Metadata;
 use serde_yaml;
 use std::fs;
 use std::fs::File;
@@ -13,11 +12,11 @@ use trauma::{download::Download};
 use serde_derive::{Serialize,Deserialize};
 use reqwest::Url;
 
-use crate::lib::data::{DataFile,MergedFile, DataCollectionMetadata};
-use crate::lib::api::figshare::{FigShareAPI, FigShareArticle};
+use crate::lib::data::{DataFile,MergedFile};
+use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::dryad::DataDryadAPI;
-use crate::lib::api::zenodo::{ZenodoAPI,ZenodoDeposition};
-use crate::lib::project::{Config, LocalMetadata};
+use crate::lib::api::zenodo::ZenodoAPI;
+use crate::lib::project::LocalMetadata;
 
 
 const AUTHKEYS: &str = ".sciflow_authkeys.yml";

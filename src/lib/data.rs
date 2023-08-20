@@ -3,7 +3,6 @@ use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
 use serde::ser::SerializeMap;
-use console::style;
 use serde;
 #[allow(unused_imports)]
 use log::{info, trace, debug};

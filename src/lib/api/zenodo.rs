@@ -1,17 +1,15 @@
-use std::fs;
 use anyhow::{anyhow,Result};
 use std::path::Path;
 use reqwest::{Method, header::{HeaderMap, HeaderValue, CONTENT_TYPE}};
 use reqwest::{Client, Response};
 use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
-use serde_json::Value;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::convert::TryInto;
 
-use crate::lib::{data::{DataFile, MergedFile}, project::LocalMetadata};
-use crate::lib::remote::{AuthKeys,RemoteFile,DownloadInfo,RequestData};
+use crate::lib::{data::DataFile, project::LocalMetadata};
+use crate::lib::remote::{AuthKeys,RemoteFile,RequestData};
 
 
 const BASE_URL: &str = "https://zenodo.org/api/deposit/depositions";
@@ -34,6 +32,7 @@ pub struct ZenodoDeposition {
 }
 
 
+#[allow(dead_code)]  // used for deserialization of requests
 #[derive(Debug, Deserialize)]
 pub struct ZenodoFileUpload {
     key: String,
@@ -223,13 +222,15 @@ impl ZenodoAPI {
         self.bucket_url = info.links.bucket;
         Ok(())
     }
-
+    
+    #[allow(unused_variables)]
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+        // TODO implement overwrite
         let bucket_url = self.bucket_url.as_ref().ok_or(anyhow!("Internal Error: Zenodo bucket_url not set."))?;
         let full_path = path_context.join(&data_file.path);
         let file = tokio::fs::File::open(full_path).await?;
-        let response = self.issue_request::<HashMap<String, String>>(Method::PUT, &bucket_url, None, Some(RequestData::File(file))).await?;
-        let info: ZenodoFileUpload = response.json().await?;
+        let response = self.issue_request::<HashMap<String, String>>(Method::PUT, bucket_url, None, Some(RequestData::File(file))).await?;
+        let _info: ZenodoFileUpload = response.json().await?;
         Ok(())
     }
 
