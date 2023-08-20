@@ -5,6 +5,9 @@ use structopt::StructOpt;
 use log::{info, trace, debug};
 
 use sciflow::lib::project::Project;
+use sciflow::logging_setup::setup;
+
+pub mod logging_setup;
 
 const INFO: &str = "\
 SciFlow: Manage and Share Scientific Data
@@ -154,6 +157,7 @@ pub fn print_errors(response: Result<()>) {
 
 #[tokio::main]
 async fn main() {
+    setup();
     match run().await {
         Ok(_) => {}
         Err(e) => {
@@ -164,7 +168,6 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    env_logger::init();
     let cli = Cli::parse();
     match &cli.command {
         Some(Commands::Add { filenames }) => {

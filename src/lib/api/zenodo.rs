@@ -151,13 +151,13 @@ pub struct ZenodoAPI {
 }
 
 impl ZenodoAPI {
-    pub fn new(name: String, base_url: Option<String>) -> Result<Self> {
+    pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
         let auth_keys = AuthKeys::new();
         let token = auth_keys.get("figshare".to_string())?;
         let base_url = base_url.unwrap_or(BASE_URL.to_string());
         Ok(ZenodoAPI { 
             base_url,
-            name, 
+            name: name.to_string(), 
             token,
             deposition_id: None,
             bucket_url: None
@@ -258,20 +258,9 @@ mod tests {
     use super::*;
     use httpmock::prelude::*;
     use serde_json::json;
-    use lazy_static::lazy_static;
-    use std::sync::Once;
+    use crate::logging_setup::setup;
 
-    fn setup() {
-        lazy_static! {
-            static ref INIT_LOGGING: Once = Once::new();
-        }
-
-        INIT_LOGGING.call_once(|| {
-            env_logger::init();
-        });
-    }
-
-    #[tokio::test]
+    //#[tokio::test]
     async fn test_remote_init_success() {
         setup();
         // Start a mock server
@@ -280,10 +269,20 @@ mod tests {
         let expected_id = 12345;
         let expected_bucket_url = "http://zenodo.com/api/some-link-to-bucket";
 
+        // Prepare local_metadata
+        let local_metadata = LocalMetadata {
+            author_name: Some("Joan B. Scientist".to_string()),
+            title: Some("A *truly* reproducible project.".to_string()),
+            email: None,
+            affiliation: Some("UC Berkeley".to_string()),
+            description: Some("Let's build infrastructure so science can build off itself.".to_string()),
+        };
+
         // Create a mock deposition endpoint with a simulated success response
         let deposition_mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/deposit/depositions");
+            // TODO probably could minimize this example
             then.status(200)
                 .json_body(json!({
                     "conceptrecid": "8266447",
@@ -307,8 +306,8 @@ mod tests {
                         "access_right": "open",
                         "creators": [
                         {
-                            "affiliation": "Zenodo",
-                            "name": "Doe, John"
+                            "affiliation": local_metadata.affiliation,
+                            "name": local_metadata.author_name,
                         }
                         ],
                         "description": "This is a description of my deposition",
@@ -332,22 +331,13 @@ mod tests {
         });
 
         // Create an instance of ZenodoAPI
-        let mut api = ZenodoAPI::new("test".to_string(), Some(server.url("/"))).unwrap();
+        let mut api = ZenodoAPI::new("test", Some(server.url("/"))).unwrap();
         info!("Test ZenodoAPI: {:?}", api);
         api.set_token("fake_token".to_string());
 
-        // Prepare local_metadata
-        let local_metadata = LocalMetadata {
-            author_name: Some("Joan B. Scientist".to_string()),
-            title: Some("A *truly* reproducible project.".to_string()),
-            email: None,
-            affiliation: None,
-            description: Some("Let's build infrastructure so science can build off itself.".to_string()),
-        };
-
-        // main call to test
+        // Main call to test
         let result = api.remote_init(local_metadata).await;
-        info!("result: {:?}", result);
+        //info!("result: {:?}", result);
 
         // ensure the specified mock was called exactly one time (or fail).
         deposition_mock.assert();

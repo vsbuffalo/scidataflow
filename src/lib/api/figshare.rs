@@ -27,10 +27,14 @@ use crate::lib::data::{DataFile, MergedFile};
 use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
 use crate::lib::project::LocalMetadata;
 
-const FIGSHARE_API_URL: &str = "https://api.figshare.com/v2/";
+const BASE_URL: &str = "https://api.figshare.com/v2/";
 
+// for testing:
+const TEST_TOKEN: &str = "test-token";
+
+// for serde deserialize default
 fn figshare_api_url() -> String {
-    FIGSHARE_API_URL.to_string()
+    BASE_URL.to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -242,13 +246,24 @@ pub struct FigShareArticle {
 }
 
 impl FigShareAPI {
-    pub fn new(name: String) -> Result<Self> {
-        let auth_keys = AuthKeys::new();
+    pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
+        let auth_keys = if base_url.is_none() {
+            // using the default base_url means we're 
+            // not using mock HTTP servers
+            AuthKeys::new()
+        } else {
+            // If base_url is set, we're using mock HTTP servers,
+            // so we use the test-token
+            let mut auth_keys = AuthKeys::default();
+            auth_keys.add("figshare", TEST_TOKEN);
+            auth_keys
+        };
         let token = auth_keys.get("figshare".to_string())?;
+        let base_url = base_url.unwrap_or(BASE_URL.to_string());
         Ok(FigShareAPI { 
-            base_url: FIGSHARE_API_URL.to_string(),
+            base_url,
             article_id: None,
-            name, 
+            name: name.to_string(), 
             token
         })
     }
@@ -257,20 +272,22 @@ impl FigShareAPI {
         self.token = token;
     }
 
-    async fn issue_request<T: serde::Serialize>(&self, method: Method, url: &str,
+    async fn issue_request<T: serde::Serialize>(&self, method: Method, endpoint: &str,
                                                 data: Option<RequestData<T>>) -> Result<Response> {
         let mut headers = HeaderMap::new();
 
-        let full_url = if url.starts_with("https://") || url.starts_with("http://") {
-            url.to_string()
+        // FigShare will give download links outside the API, so we handle 
+        // that possibility here.
+        let url = if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+            endpoint.to_string()
         } else {
-            format!("{}{}", self.base_url, url.trim_start_matches('/'))
+            format!("{}/{}", self.base_url, endpoint.trim_start_matches('/'))
         };
 
-        trace!("request URL: {:?}", full_url);
+        trace!("request URL: {:?}", url);
 
         let client = Client::new();
-        let mut request = client.request(method, &full_url);
+        let mut request = client.request(method, &url);
 
         headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
         trace!("headers: {:?}", headers);
@@ -289,7 +306,7 @@ impl FigShareAPI {
         if response_status.is_success() {
             Ok(response)
         } else {
-            Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, full_url, response.text().await?))
+            Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, url, response.text().await?))
         }
     }
 
@@ -308,7 +325,7 @@ impl FigShareAPI {
 
     // Create a new FigShare Article
     pub async fn create_article(&self, title: &str) -> Result<FigShareArticle> {
-        let url = "account/articles";
+        let endpoint = "account/articles";
 
         // (1) create the data for this article
         let mut data: HashMap<String, String> = HashMap::new();
@@ -317,7 +334,7 @@ impl FigShareAPI {
         debug!("creating data for article: {:?}", data);
 
         // (2) issue request and parse out the article ID from location
-        let response = self.issue_request(Method::POST, url, Some(RequestData::Json(data))).await?;
+        let response = self.issue_request(Method::POST, endpoint, Some(RequestData::Json(data))).await?;
         let data = response.json::<Value>().await?;
         let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
             Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
@@ -476,4 +493,56 @@ impl FigShareAPI {
         info!("deleted FigShare file '{}' (Article ID={})", file.name, article_id);
         Ok(())
     }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use serde_json::json;
+    use crate::logging_setup::setup;
+
+
+    #[tokio::test]
+    async fn test_create_article() {
+        setup();
+        // Start a mock server
+        let server = MockServer::start();
+
+        let expected_id = 12345;
+        let title = "Test Article";
+
+        // Create a mock endpoint for creating an article
+        let create_article_mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/account/articles")
+                .header("Authorization", &format!("token {}", TEST_TOKEN.to_string()))
+                .json_body(json!({
+                    "title": title.to_string(),
+                    "defined_type": "dataset"
+                }));
+            then.status(201)
+                .json_body(json!({
+                    "location": format!("{}account/articles/{}", server.url(""), expected_id)
+                }));
+        });
+
+        // Define a sample title for the article
+        let mut api = FigShareAPI::new("Test Article", Some(server.url(""))).unwrap();
+
+        info!("auth_keys: {:?}", api.token);
+        // Call the create_article method
+        let result = api.create_article(title).await;
+        
+        // Check the result
+        assert_eq!(result.is_ok(), true);
+        let article = result.unwrap();
+        assert_eq!(article.title, title);
+        assert_eq!(article.id, expected_id);
+
+        // Verify that the mock was called exactly once
+        create_article_mock.assert();
+    } 
+
 }

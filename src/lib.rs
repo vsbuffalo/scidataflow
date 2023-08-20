@@ -10,3 +10,5 @@ pub mod lib {
     pub mod remote;
     pub mod utils;
 }
+
+pub mod logging_setup;

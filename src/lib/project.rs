@@ -322,8 +322,8 @@ impl Project {
 
         let service = service.to_lowercase();
         let mut remote = match service.as_str() {
-            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new(name)?)),
-            "zenodo" => Ok(Remote::ZenodoAPI(ZenodoAPI::new(name, None)?)),
+            "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new(&name, None)?)),
+            "zenodo" => Ok(Remote::ZenodoAPI(ZenodoAPI::new(&name, None)?)),
             _ => Err(anyhow!("Service '{}' is not supported!", service))
         }?;
 
