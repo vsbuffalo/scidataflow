@@ -4,13 +4,13 @@ use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 
-use sciflow::lib::project::Project;
-use sciflow::logging_setup::setup;
+use scidataflow::lib::project::Project;
+use scidataflow::logging_setup::setup;
 
 pub mod logging_setup;
 
 const INFO: &str = "\
-SciFlow: Manage and Share Scientific Data
+SciDataFlow: Manage and Share Scientific Data
 usage: scf [--help] <subcommand>
 
 Some examples:

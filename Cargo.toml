@@ -1,11 +1,11 @@
 [package]
-name = "sciflow"
+name = "scidataflow"
 version = "0.1.0"
 edition = "2021"
 include = ["src/**/*", "tests/test_data/**/*"]
 
 [lib]
-name = "sciflow"
+name = "scidataflow"
 path = "src/lib.rs"
 
 [[bin]]

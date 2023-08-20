@@ -14,7 +14,7 @@ mod tests {
     use super::get_statuses;
     use super::generate_random_tsv;
     use std::path::PathBuf;
-    use sciflow::lib::data::LocalStatusCode;
+    use scidataflow::lib::data::LocalStatusCode;
 
     #[test]
     fn test_fixture() {

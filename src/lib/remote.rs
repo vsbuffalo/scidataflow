@@ -19,7 +19,7 @@ use crate::lib::api::zenodo::ZenodoAPI;
 use crate::lib::project::LocalMetadata;
 
 
-const AUTHKEYS: &str = ".sciflow_authkeys.yml";
+const AUTHKEYS: &str = ".scidataflow_authkeys.yml";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DownloadInfo {

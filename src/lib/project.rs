@@ -45,7 +45,7 @@ pub fn find_manifest(start_dir: Option<&PathBuf>, filename: &str) -> Option<Path
 pub fn config_path() -> Result<PathBuf> {
     let mut config_path: PathBuf = dirs::home_dir()
         .ok_or_else(|| anyhow!("Cannot load home directory!"))?;
-    config_path.push(".sciflow_config");
+    config_path.push(".scidataflow_config");
     Ok(config_path)
 }
 
@@ -97,20 +97,20 @@ pub struct Project {
 
 impl Project {
     fn get_manifest() -> Result<PathBuf> {
-        find_manifest(None, MANIFEST).ok_or(anyhow!("SciFlow not initialized."))
+        find_manifest(None, MANIFEST).ok_or(anyhow!("SciDataFlow not initialized."))
     }
 
     pub fn load_config() -> Result<Config> {
         let config_path = config_path()?;
         let mut file = File::open(&config_path)
-            .with_context(|| format!("No sciflow config found at \
-                                     {:?}. Please set with scf config --user <NAME> \
-                                     [--email <EMAIL> --affil <AFFILIATION>]", &config_path))?;
-                                     let mut contents = String::new();
-                                     file.read_to_string(&mut contents)?;
+            .map_err(|_| anyhow!("No SciDataFlow config found at \
+                                 {:?}. Please set with scf config --user <NAME> \
+                                 [--email <EMAIL> --affil <AFFILIATION>]", &config_path))?;
+                                 let mut contents = String::new();
+                                 file.read_to_string(&mut contents)?;
 
-                                     let config: Config = serde_yaml::from_str(&contents)?;
-                                     Ok(config)
+                                 let config: Config = serde_yaml::from_str(&contents)?;
+                                 Ok(config)
     }
 
     pub fn save_config(config: Config) -> Result<()> {
@@ -122,10 +122,10 @@ impl Project {
     }
 
     pub fn new() -> Result<Self> {
-        let manifest = Project::get_manifest()?;
+        let manifest = Project::get_manifest().context("Failed to get the manifest")?;
         info!("manifest: {:?}", manifest);
-        let data = Project::load(&manifest)?;
-        let config = Project::load_config()?;
+        let data = Project::load(&manifest).context("Failed to load data from the manifest")?;
+        let config = Project::load_config().context("Failed to load the project configuration")?;
         let proj = Project { manifest, data, config };
         Ok(proj)
     }

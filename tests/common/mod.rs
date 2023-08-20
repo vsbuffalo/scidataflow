@@ -20,8 +20,8 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use lazy_static::lazy_static;
 
-use sciflow::lib::project::Project;
-use sciflow::lib::data::StatusEntry;
+use scidataflow::lib::project::Project;
+use scidataflow::lib::data::StatusEntry;
 
 pub fn make_mock_fixtures() -> Vec<DataFileFixture> { 
     let files = vec![
@@ -190,6 +190,11 @@ pub fn setup(do_add: bool) -> TestFixture {
     let _ = test_env.build_project_directories(data_fixtures);
 
     // initializes sciflow in the test environment
+    let current_dir = env::current_dir().unwrap();
+    info!("temp_dir: {:?}, current directory: {:?}", test_env.temp_dir, current_dir);
+    let _ = Project::set_config(&Some("Joan B. Scientist".to_string()), 
+                                &Some("joan@ucberkely.edu".to_string()),
+                                &Some("UC Berkeley".to_string()));
     let _ = Project::init(Some(project_name));
     let mut project = Project::new().expect("setting up TestFixture failed");
 

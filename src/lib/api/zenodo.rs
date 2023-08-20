@@ -113,7 +113,7 @@ impl TryInto<ZenodoDepositionData> for LocalMetadata {
     fn try_into(self) -> Result<ZenodoDepositionData> {
         let name = self.author_name.ok_or_else(|| anyhow!("Author name is required"))?;
         // TODO? Warn user of default description?
-        let description = self.description.unwrap_or("Upload by SciFlow.".to_string());
+        let description = self.description.unwrap_or("Upload by SciDataFlow.".to_string());
 
         Ok(ZenodoDepositionData {
             metadata: ZenodoMetadata {
@@ -260,7 +260,7 @@ mod tests {
     use serde_json::json;
     use crate::logging_setup::setup;
 
-    //#[tokio::test]
+    #[tokio::test]
     async fn test_remote_init_success() {
         setup();
         // Start a mock server
