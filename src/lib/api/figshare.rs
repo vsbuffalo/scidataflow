@@ -529,7 +529,7 @@ mod tests {
         });
 
         // Define a sample title for the article
-        let mut api = FigShareAPI::new("Test Article", Some(server.url(""))).unwrap();
+        let api = FigShareAPI::new("Test Article", Some(server.url(""))).unwrap();
 
         info!("auth_keys: {:?}", api.token);
         // Call the create_article method
