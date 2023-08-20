@@ -1,4 +1,4 @@
-name: sciflow
+name: sciflow build & test
 
 on:
   push:

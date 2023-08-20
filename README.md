@@ -1,3 +1,5 @@
+![CI tests](https://github.com/vsbuffalo/sciflow/workflows/CI/badge.svg)
+
 # SciFlow -- Facilitating the Flow of Data in Science
 
 SciFlow is a both (1) a minimal specification of the data used in a scientific
