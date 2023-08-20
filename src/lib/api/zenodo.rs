@@ -12,7 +12,7 @@ use crate::lib::{data::DataFile, project::LocalMetadata};
 use crate::lib::remote::{AuthKeys,RemoteFile,RequestData};
 
 
-const BASE_URL: &str = "https://zenodo.org/api/deposit/depositions";
+const BASE_URL: &str = "https://zenodo.org/api";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ZenodoDeposition {
@@ -138,6 +138,8 @@ struct PrereserveDoi {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ZenodoAPI {
+    #[serde(skip_serializing, skip_deserializing)]
+    base_url: String,
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
     token: String,
@@ -149,10 +151,12 @@ pub struct ZenodoAPI {
 }
 
 impl ZenodoAPI {
-    pub fn new(name: String) -> Result<Self> {
+    pub fn new(name: String, base_url: Option<String>) -> Result<Self> {
         let auth_keys = AuthKeys::new();
         let token = auth_keys.get("figshare".to_string())?;
+        let base_url = base_url.unwrap_or(BASE_URL.to_string());
         Ok(ZenodoAPI { 
+            base_url,
             name, 
             token,
             deposition_id: None,
@@ -168,11 +172,10 @@ impl ZenodoAPI {
     // TODO: this is the same as FigShareAPI's issue_request().
     // Since APIs can have different authentication routines, we
     // should handle that part separately.
-    async fn issue_request<T: serde::Serialize + std::fmt::Debug>(&self, method: Method, url: &str,
+    async fn issue_request<T: serde::Serialize + std::fmt::Debug>(&self, method: Method, endpoint: &str,
                                                                   headers: Option<HeaderMap>,
                                                                   data: Option<RequestData<T>>) -> Result<Response> {
-        assert!(url.starts_with("https://"));
-        let url = format!("{}?access_token={}", url, self.token);
+        let url = format!("{}/{}?access_token={}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'), self.token);
         trace!("request URL: {:?}", &url);
 
         let client = Client::new();
@@ -216,8 +219,9 @@ impl ZenodoAPI {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let metadata: ZenodoDepositionData = local_metadata.try_into()?;
         let data = Some(RequestData::Json(metadata));
-        let response = self.issue_request(Method::POST, BASE_URL, Some(headers), data).await?;
+        let response = self.issue_request(Method::POST, "/deposit/depositions", Some(headers), data).await?;
         let info: ZenodoDeposition = response.json().await?;
+        info!("ZenodoDeposition: {:?}", info);
         self.deposition_id = Some(info.id as u64);
         self.bucket_url = info.links.bucket;
         Ok(())
@@ -236,7 +240,7 @@ impl ZenodoAPI {
 
     pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
         let id = self.deposition_id.ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))?;
-        let url = format!("{}/{}/files", BASE_URL, id);
+        let url = format!("{}/{}/files", "/deposit/depositions", id);
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None, None).await?;
         let files: Vec<ZenodoFile> = response.json().await?;
         Ok(files)
@@ -248,3 +252,109 @@ impl ZenodoAPI {
         Ok(remote_files)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::prelude::*;
+    use serde_json::json;
+    use lazy_static::lazy_static;
+    use std::sync::Once;
+
+    fn setup() {
+        lazy_static! {
+            static ref INIT_LOGGING: Once = Once::new();
+        }
+
+        INIT_LOGGING.call_once(|| {
+            env_logger::init();
+        });
+    }
+
+    #[tokio::test]
+    async fn test_remote_init_success() {
+        setup();
+        // Start a mock server
+        let server = MockServer::start();
+
+        let expected_id = 12345;
+        let expected_bucket_url = "http://zenodo.com/api/some-link-to-bucket";
+
+        // Create a mock deposition endpoint with a simulated success response
+        let deposition_mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/deposit/depositions");
+            then.status(200)
+                .json_body(json!({
+                    "conceptrecid": "8266447",
+                    "created": "2023-08-20T01:31:12.406094+00:00",
+                    "doi": "",
+                    "doi_url": "https://doi.org/",
+                    "files": [],
+                    "id": expected_id,
+                    "links": {
+                        "bucket": expected_bucket_url,
+                        "discard": "https://zenodo.org/api/deposit/depositions/8266448/actions/discard",
+                        "edit": "https://zenodo.org/api/deposit/depositions/8266448/actions/edit",
+                        "files": "https://zenodo.org/api/deposit/depositions/8266448/files",
+                        "html": "https://zenodo.org/deposit/8266448",
+                        "latest_draft": "https://zenodo.org/api/deposit/depositions/8266448",
+                        "latest_draft_html": "https://zenodo.org/deposit/8266448",
+                        "publish": "https://zenodo.org/api/deposit/depositions/8266448/actions/publish",
+                        "self": "https://zenodo.org/api/deposit/depositions/8266448"
+                    },
+                    "metadata": {
+                        "access_right": "open",
+                        "creators": [
+                        {
+                            "affiliation": "Zenodo",
+                            "name": "Doe, John"
+                        }
+                        ],
+                        "description": "This is a description of my deposition",
+                        "doi": "",
+                        "license": "CC-BY-4.0",
+                        "prereserve_doi": {
+                            "doi": "10.5281/zenodo.8266448",
+                            "recid": 8266448
+                        },
+                        "publication_date": "2023-08-20",
+                        "title": "My Deposition Title",
+                        "upload_type": "poster"
+                    },
+                    "modified": "2023-08-20T01:31:12.406103+00:00",
+                    "owner": 110965,
+                    "record_id": 8266448,
+                    "state": "unsubmitted",
+                    "submitted": false,
+                    "title": "My Deposition Title"
+                }));
+        });
+
+        // Create an instance of ZenodoAPI
+        let mut api = ZenodoAPI::new("test".to_string(), Some(server.url("/"))).unwrap();
+        info!("Test ZenodoAPI: {:?}", api);
+        api.set_token("fake_token".to_string());
+
+        // Prepare local_metadata
+        let local_metadata = LocalMetadata {
+            author_name: Some("Joan B. Scientist".to_string()),
+            title: Some("A *truly* reproducible project.".to_string()),
+            email: None,
+            affiliation: None,
+            description: Some("Let's build infrastructure so science can build off itself.".to_string()),
+        };
+
+        // main call to test
+        let result = api.remote_init(local_metadata).await;
+        info!("result: {:?}", result);
+
+        // ensure the specified mock was called exactly one time (or fail).
+        deposition_mock.assert();
+
+        // Assert that the deposition_id and bucket_url have been set correctly
+        assert_eq!(api.deposition_id, Some(expected_id as u64));
+        assert_eq!(api.bucket_url, Some(expected_bucket_url.to_string()));
+    }
+}
+
