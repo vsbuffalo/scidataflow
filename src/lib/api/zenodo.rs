@@ -14,6 +14,9 @@ use crate::lib::remote::{AuthKeys,RemoteFile,RequestData};
 
 const BASE_URL: &str = "https://zenodo.org/api";
 
+// for testing:
+const TEST_TOKEN: &str = "test-token";
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ZenodoDeposition {
     conceptrecid: String,
@@ -136,9 +139,16 @@ struct PrereserveDoi {
     recid: usize,
 }
 
+
+// for serde deserialize default
+fn zenodo_api_url() -> String {
+    BASE_URL.to_string()
+}
+
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ZenodoAPI {
-    #[serde(skip_serializing, skip_deserializing)]
+    #[serde(skip_serializing, skip_deserializing,default="zenodo_api_url")]
     base_url: String,
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
@@ -152,9 +162,23 @@ pub struct ZenodoAPI {
 
 impl ZenodoAPI {
     pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
-        let auth_keys = AuthKeys::new();
-        let token = auth_keys.get("figshare".to_string())?;
+        // Note: this constructor is not called often, except through 
+        // Project::link(), since serde is usually deserializing the 
+        // new ZenodoAPI Remote variant from the manifest.
+        let auth_keys = if base_url.is_none() {
+            // using the default base_url means we're 
+            // not using mock HTTP servers
+            AuthKeys::new()
+        } else {
+            // If base_url is set, we're using mock HTTP servers,
+            // so we use the test-token
+            let mut auth_keys = AuthKeys::default();
+            auth_keys.temporary_add("zenodo", TEST_TOKEN);
+            auth_keys
+        };
+        let token = auth_keys.get("zenodo".to_string())?;
         let base_url = base_url.unwrap_or(BASE_URL.to_string());
+        println!("Base URL in constructor: {:?}", base_url);
         Ok(ZenodoAPI { 
             base_url,
             name: name.to_string(), 
@@ -175,6 +199,8 @@ impl ZenodoAPI {
     async fn issue_request<T: serde::Serialize + std::fmt::Debug>(&self, method: Method, endpoint: &str,
                                                                   headers: Option<HeaderMap>,
                                                                   data: Option<RequestData<T>>) -> Result<Response> {
+
+        println!("BASE_URL: {:?}", self.base_url);
         let url = format!("{}/{}?access_token={}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'), self.token);
         trace!("request URL: {:?}", &url);
 
@@ -239,6 +265,7 @@ impl ZenodoAPI {
     }
 
     pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
+        println!("self: {:?}", self);
         let id = self.deposition_id.ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))?;
         let url = format!("{}/{}/files", "/deposit/depositions", id);
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None, None).await?;
@@ -333,10 +360,9 @@ mod tests {
         // Create an instance of ZenodoAPI
         let mut api = ZenodoAPI::new("test", Some(server.url("/"))).unwrap();
         info!("Test ZenodoAPI: {:?}", api);
-        api.set_token("fake_token".to_string());
 
         // Main call to test
-        let result = api.remote_init(local_metadata).await;
+        let _result = api.remote_init(local_metadata).await;
         //info!("result: {:?}", result);
 
         // ensure the specified mock was called exactly one time (or fail).

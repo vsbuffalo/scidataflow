@@ -121,6 +121,13 @@ impl AuthKeys {
         self.save();
     }
 
+    pub fn temporary_add(&mut self, service: &str, key: &str) {
+        // no save, i.e. for testing -- we do *not* want to overwrite the 
+        // dev's own keys.
+        let service = service.to_lowercase();
+        self.keys.insert(service, key.to_owned());
+    }
+
     pub fn get(&self, service: String) -> Result<String> {
         match self.keys.get(&service) {
             None => Err(anyhow!("no key found for service '{}'", service)),

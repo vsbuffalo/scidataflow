@@ -13,6 +13,9 @@ use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use std::fs;
 use trauma::downloader::{DownloaderBuilder,StyleOptions,ProgressBarOpts};
+use std::time::Duration;
+use std::thread;
+use indicatif::{ProgressBar, ProgressStyle};
 use colored::*;
 
 use crate::{print_warn,print_info};
@@ -605,22 +608,50 @@ impl DataCollection {
     // Fetch all remote files.
     //
     // (remote service, path) -> { filename -> RemoteFile, ... }
-    pub async fn fetch(&mut self) -> Result<HashMap<(String,String), HashMap<String,RemoteFile>>> {
+    pub async fn fetch(&mut self) -> Result<HashMap<(String, String), HashMap<String, RemoteFile>>> {
         self.authenticate_remotes()?;
+
         let mut all_remote_files = HashMap::new();
-        for (path, remote) in &self.remotes {
-            let remote_files = remote.get_files_hashmap().await?;
-            all_remote_files.insert((remote.name().to_string(), path.clone()), remote_files);
+        let pb = ProgressBar::new(self.remotes.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+                     .progress_chars("=> ")
+                     .template("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}")?
+                    );
+        pb.set_message(format!("Fetching remote files..."));
+
+        // Convert remotes into Futures, so that they can be awaited in parallel
+        let fetch_futures: Vec<_> = self.remotes.iter().map(|(path, remote)| {
+            let remote_name = remote.name().to_string();
+            let path_clone = path.clone();
+            async move {
+                let remote_files = remote.get_files_hashmap().await?;
+                Ok(((remote_name, path_clone), remote_files))
+            }
+        }).collect();
+
+        let results = join_all(fetch_futures).await;
+
+        for result in results {
+            match result {
+                Ok((key, value)) => {
+                    pb.set_message(format!("Fetching remote files...   {} done.", key.0));
+                    all_remote_files.insert(key, value);
+                    pb.inc(1);
+                },
+                Err(e) => return Err(e), // Handle errors as needed
+            }
         }
-        //info!("fetch() remote files: {:?}", all_remote_files);
+
+        pb.finish_with_message("Fetching completed!");
         Ok(all_remote_files)
     }
-
     // Merge all local and remote files.
     //
     // Use a fetch to get all remote files (as RemoteFile), and merge these 
     // in with the local data files (DataFile) into a MergedFile struct.
     // Missing remote/local files are None.
+    // 
+    // Returns: Result with HashMap of directory -> { File -> MergedFile, ... } 
     pub async fn merge(&mut self, include_remotes: bool) -> Result<HashMap<String, HashMap<String, MergedFile>>> {
         // directory -> {(filename -> MergedFile), ...}
         let mut result: HashMap<String, HashMap<String, MergedFile>> = HashMap::new();
@@ -673,44 +704,53 @@ impl DataCollection {
 
     // Get the status of the DataCollection, optionally with remotes.
     // 
-    // Organized by directory
+    // Returns Result of BTreeMap of directory -> [ StatusEntry, ...]
     pub async fn status(&mut self, path_context: &Path, include_remotes: bool) -> Result<BTreeMap<String, Vec<StatusEntry>>> {
-        // get all merged files, used to compute the status
         let merged_files = self.merge(include_remotes).await?;
-        //info!("merged_file: {:?}", merged_files);
+
+        let mut statuses_futures = FuturesUnordered::new();
+
+        for (directory, inner_map) in merged_files.into_iter() {
+            // this clone is to prevent a borrow issue due to async move below
+            let files: Vec<_> = inner_map.values().cloned().collect();
+            for mf in files {
+                let directory_clone = directory.clone();
+                statuses_futures.push(async move {
+                    let status_entry = mf.status_entry(path_context, include_remotes).await.map_err(anyhow::Error::from)?;
+                    Ok::<(String, StatusEntry), anyhow::Error>((directory_clone, status_entry))
+                });
+            }
+        }
 
         let mut statuses = BTreeMap::new();
 
-        // Get the StatusEntry async via join_all() for each 
-        // MergedFile. The inner hash map has keys that are the 
-        // file names (since this was use for join); these are not 
-        // needed so they're ditched, leaving a 
-        // BTreeMap<Vec<StatusEntry>>
-        let statuses_futures: FuturesUnordered<_> = merged_files
-            .into_iter()
-            .map(|(outer_key, inner_map)| {
-                // create a future for each merged_file, and collect the results
-                async move {
-                    let status_entries: Result<Vec<_>, _> = join_all(
-                        inner_map.values()
-                        // get the StatusEntry for each MergedFile
-                        .map(|mf| async { mf.status_entry(path_context, include_remotes).await })
-                        .collect::<Vec<_>>()
-                        ).await.into_iter().collect();
-                    status_entries.map(|entries| (outer_key, entries))
-                }
-            })
-        .collect();
+        let pb = ProgressBar::new(statuses_futures.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+                     .progress_chars("=> ")
+                     .template("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}")?
+                    );
 
-        let statuses_results: Vec<_> = statuses_futures.collect().await;
 
-        for result in statuses_results {
+        let pb_clone = pb.clone();
+        thread::spawn(move || {
+            loop {
+                pb_clone.tick();
+                thread::sleep(Duration::from_millis(20));
+            }
+        });
+        // process the futures as they become ready
+        pb.set_message("Calculating MD5s...");
+        while let Some(result) = statuses_futures.next().await {
             if let Ok((key, value)) = result {
-                statuses.insert(key, value);
+                pb.set_message(format!("Calculating MD5s... {} done.", &value.name));
+                statuses.entry(key).or_insert_with(Vec::new).push(value);
+                pb.inc(1);
             } else {
-                // Handle the error as needed
+                result?;
             }
         }
+
+        pb.finish_with_message("Complete.");
         Ok(statuses)
     }
 
@@ -842,7 +882,7 @@ impl DataCollection {
         let mut current_skipped = Vec::new();
         let mut messy_skipped = Vec::new();
         let mut overwrite_skipped = Vec::new();
- 
+
         for (dir, merged_files) in all_files.iter() {
             for merged_file in merged_files.values().filter(|f| f.can_download()) {
 
@@ -896,10 +936,13 @@ impl DataCollection {
             }
         }
 
+        let style = ProgressBarOpts::new(
+                     Some("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}".to_string()),
+                     Some("=> ".to_string()),
+                     true, true);
 
-        let mut style_opts = StyleOptions::default();
-        style_opts.set_child(ProgressBarOpts::with_pip_style());
-
+        let style_clone = style.clone();
+        let style_opts = StyleOptions::new(style, style_clone);
 
         let total_files = downloads.len();
         if !downloads.is_empty() { 

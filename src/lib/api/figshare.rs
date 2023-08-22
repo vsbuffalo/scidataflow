@@ -247,6 +247,9 @@ pub struct FigShareArticle {
 
 impl FigShareAPI {
     pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
+        // Note: this constructor is not called often, except through 
+        // Project::link(), since serde is usually deserializing the 
+        // new FigShareAPI Remote variant from the manifest.
         let auth_keys = if base_url.is_none() {
             // using the default base_url means we're 
             // not using mock HTTP servers
@@ -255,7 +258,7 @@ impl FigShareAPI {
             // If base_url is set, we're using mock HTTP servers,
             // so we use the test-token
             let mut auth_keys = AuthKeys::default();
-            auth_keys.add("figshare", TEST_TOKEN);
+            auth_keys.temporary_add("figshare", TEST_TOKEN);
             auth_keys
         };
         let token = auth_keys.get("figshare".to_string())?;
