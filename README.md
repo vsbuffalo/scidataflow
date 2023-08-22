@@ -129,5 +129,6 @@ it's on the remote, this should prompt an error.
 
  - wrap git, do something like `scf clone` that pulls in Git repo.
  - recursive pulling.
+ - check no external file; add tests
 
 

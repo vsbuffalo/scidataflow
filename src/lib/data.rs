@@ -478,7 +478,6 @@ pub struct DataCollection {
 /// interacting with the data manifest (including remotes).
 impl DataCollection {
     pub fn new() -> Self {
-
         Self {
             files: HashMap::new(),
             remotes: HashMap::new(),
@@ -575,6 +574,9 @@ impl DataCollection {
         }
     }
 
+    // Register the remote
+    //
+    // This can overwrite existing entries.
     pub fn register_remote(&mut self, dir: &String, remote: Remote) -> Result<()> {
         self.validate_remote_directory(dir)?;
         self.remotes.insert(dir.to_string(), remote);
@@ -1011,7 +1013,11 @@ impl DataCollection {
 
 #[cfg(test)]
 mod tests {
-    use super::DataFile;
+    use crate::lib::api::figshare::{FIGSHARE_BASE_URL,FigShareAPI, self};
+    use crate::lib::remote::Remote;
+    use crate::lib::test_utilities::check_error;
+
+    use super::{DataFile, DataCollection, DataCollectionMetadata};
     use std::path::Path;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -1125,6 +1131,24 @@ mod tests {
     }
 
 
-    // ==== Data Collection Tests
+    #[test]
+    fn test_register_remote_figshare() {
+        let mut dc = DataCollection::new();
+
+        let dir = "data/supplement".to_string();
+        let result = FigShareAPI::new("Test remote", None);
+        assert!(result.is_ok(), "FigShareAPI::new() resulted in error!");
+        let figshare = result.unwrap();
+        assert!(figshare.get_base_url() == FIGSHARE_BASE_URL, "FigShareAPI.base_url is not correct!");
+        dc.register_remote(&dir, Remote::FigShareAPI(figshare)).unwrap();
+
+        // check that it's been inserted
+        assert!(dc.remotes.contains_key(&dir), "Remote not registered!");
+
+        // Let's check that validate_remote_directory() is working
+        let figshare = FigShareAPI::new("Another test remote", None).unwrap();
+        let result = dc.register_remote(&dir, Remote::FigShareAPI(figshare));
+        check_error(result, "already tracked");
+    }
 
 }

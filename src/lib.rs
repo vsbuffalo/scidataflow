@@ -9,6 +9,7 @@ pub mod lib {
     pub mod macros;
     pub mod remote;
     pub mod utils;
+    pub mod test_utilities;
 }
 
 pub mod logging_setup;

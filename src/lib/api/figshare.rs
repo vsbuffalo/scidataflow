@@ -27,14 +27,14 @@ use crate::lib::data::{DataFile, MergedFile};
 use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
 use crate::lib::project::LocalMetadata;
 
-const BASE_URL: &str = "https://api.figshare.com/v2/";
+pub const FIGSHARE_BASE_URL: &str = "https://api.figshare.com/v2/";
 
 // for testing:
 const TEST_TOKEN: &str = "test-token";
 
 // for serde deserialize default
 fn figshare_api_url() -> String {
-    BASE_URL.to_string()
+    FIGSHARE_BASE_URL.to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -262,7 +262,7 @@ impl FigShareAPI {
             auth_keys
         };
         let token = auth_keys.get("figshare".to_string())?;
-        let base_url = base_url.unwrap_or(BASE_URL.to_string());
+        let base_url = base_url.unwrap_or(FIGSHARE_BASE_URL.to_string());
         Ok(FigShareAPI { 
             base_url,
             article_id: None,
@@ -273,6 +273,10 @@ impl FigShareAPI {
 
     pub fn set_token(&mut self, token: String) {
         self.token = token;
+    }
+
+    pub fn get_base_url(&self) -> String {
+        self.base_url.clone()
     }
 
     async fn issue_request<T: serde::Serialize>(&self, method: Method, endpoint: &str,
