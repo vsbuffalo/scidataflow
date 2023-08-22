@@ -13,7 +13,7 @@ mod tests {
     use super::setup;
     use super::get_statuses;
     use super::generate_random_tsv;
-    use std::path::PathBuf;
+    use std::path::{Path,PathBuf};
     use scidataflow::lib::data::LocalStatusCode;
 
     #[test]
@@ -96,15 +96,44 @@ mod tests {
         let updated_status = updated_status_option.unwrap().clone();
         assert_eq!(updated_status, LocalStatusCode::Modified);
 
-        // Now, let's re-add the file and make sure the status goes back to current.
+        // Now, let's update these files
         let re_add_files = vec![file_to_check.to_string_lossy().to_string()];
-        let _ = fixture.project.add(&re_add_files);
 
+        for file in &re_add_files {
+            let result = fixture.project.update(Some(&file));
+            assert!(result.is_ok(), "re-adding raised Error!");
+        }
+        
+        // and make sure the status goes back to current.
         let readd_statuses = get_statuses_map(&mut fixture, &path_context).await;
         let readd_status_option = readd_statuses.get(&file_to_check).unwrap().local_status.clone();
         let readd_status = readd_status_option.unwrap().clone();
         assert_eq!(readd_status, LocalStatusCode::Current);
     }
+
+    #[tokio::test]
+    async fn test_add_already_added_error() {
+        let mut fixture = setup(true);
+
+        if let Some(files) = &fixture.env.files {
+            for file in files {
+                let mut file_list = Vec::new();
+                file_list.push(file.path.clone());
+                let result = fixture.project.add(&file_list);
+
+                // check that we get 
+                match result {
+                    Ok(_) => assert!(false, "Expected an error, but got Ok"),
+                    Err(err) => {
+                        assert!(err.to_string().contains("already registered"),
+                        "Unexpected error: {:?}", err);
+                    }
+                };
+
+            }
+        }
+    }
+
 
 }
 

@@ -318,6 +318,9 @@ impl MergedFile {
 impl DataFile {
     pub fn new(path: String, path_context: &Path) -> Result<DataFile> {
         let full_path = path_context.join(&path);
+        if !full_path.exists() {
+            return Err(anyhow!("File '{}' does not exist.", path))
+        }
         let md5 = match compute_md5(&full_path)? {
             Some(md5) => md5,
             None => return Err(anyhow!("Could not compute MD5 as file does not exist")),
@@ -482,8 +485,15 @@ impl DataCollection {
     }
 
     pub fn register(&mut self, data_file: DataFile) -> Result<()> {
-        self.files.insert(data_file.path.clone(), data_file);
-        Ok(())
+        let path = data_file.path.clone();
+        if self.files.contains_key(&path) {
+            Err(anyhow!("File '{}' is already registered in the data manifest. \
+                        If you wish to update the MD5 or metadata, use: sdf update FILE",
+                        &path))
+        } else {
+            self.files.insert(path, data_file);
+            Ok(())
+        }
     }
 
     pub fn update(&mut self, filename: Option<&String>, path_context: &Path) -> Result<()> {
@@ -642,7 +652,7 @@ impl DataCollection {
             }
         }
 
-        pb.finish_with_message("Fetching completed!");
+        pb.finish_with_message("Fetching completed.");
         Ok(all_remote_files)
     }
     // Merge all local and remote files.
@@ -982,5 +992,31 @@ impl DataCollection {
 
         Ok(())
     }
+
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::DataFile;
+    use std::path::Path;
+    use anyhow::{anyhow,Result};
+
+    #[tokio::test]
+    async fn test_datafile_new_with_nonexistent_path() {
+        let nonexistent_path = "some/nonexistent/path".to_string();
+        let path_context = Path::new("");
+
+        let result = DataFile::new(nonexistent_path, &path_context);
+        match result {
+            Ok(_) => assert!(false, "Expected an error, but got Ok"),
+            Err(err) => {
+                assert!(err.to_string().contains("does not exist"),
+                "Unexpected error: {:?}", err);
+            }
+        };
+    }
+
+
 
 }
