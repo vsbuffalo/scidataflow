@@ -13,7 +13,7 @@ mod tests {
     use super::setup;
     use super::get_statuses;
     use super::generate_random_tsv;
-    use std::path::{Path,PathBuf};
+    use std::path::PathBuf;
     use scidataflow::lib::data::LocalStatusCode;
 
     #[test]
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_add_status_modified() {
+    async fn test_add_update_status_modified() {
         let mut fixture = setup(true);
         let path_context = fixture.project.path_context();
         let statuses = get_statuses_map(&mut fixture, &path_context).await;

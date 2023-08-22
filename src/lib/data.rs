@@ -403,6 +403,18 @@ impl DataFile {
         Ok(local_status)
     }
 
+    pub fn update(&mut self, path_context: &Path) -> Result<()> {
+        self.update_md5(path_context)?;
+        self.update_size(path_context)?;
+        Ok(())
+    }
+
+    pub fn update_size(&mut self, path_context: &Path) -> Result<()> {
+        let new_size = self.get_size(path_context)?;
+        self.size = new_size;
+        Ok(())
+    }
+
     pub fn update_md5(&mut self, path_context: &Path) -> Result<()> {
         let new_md5 = match self.get_md5(path_context)? {
             Some(md5) => md5,
@@ -466,6 +478,7 @@ pub struct DataCollection {
 /// interacting with the data manifest (including remotes).
 impl DataCollection {
     pub fn new() -> Self {
+
         Self {
             files: HashMap::new(),
             remotes: HashMap::new(),
@@ -486,13 +499,13 @@ impl DataCollection {
 
     pub fn register(&mut self, data_file: DataFile) -> Result<()> {
         let path = data_file.path.clone();
-        if self.files.contains_key(&path) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.files.entry(path) {
+            e.insert(data_file);
+            Ok(())
+        } else {
             Err(anyhow!("File '{}' is already registered in the data manifest. \
                         If you wish to update the MD5 or metadata, use: sdf update FILE",
-                        &path))
-        } else {
-            self.files.insert(path, data_file);
-            Ok(())
+                        &data_file.path))
         }
     }
 
@@ -500,7 +513,7 @@ impl DataCollection {
         match filename {
             Some(file) => {
                 if let Some(data_file) = self.files.get_mut(file) {
-                    data_file.update_md5(path_context)?;
+                    data_file.update(path_context)?;
                     debug!("rehashed file {:?}", data_file.path);
                 }
             }
@@ -509,7 +522,7 @@ impl DataCollection {
                 let all_files: Vec<_> = self.files.keys().cloned().collect();
                 for file in all_files {
                     if let Some(data_file) = self.files.get_mut(&file) {
-                        data_file.update_md5(path_context)?;
+                        data_file.update(path_context)?;
                         debug!("rehashed file {:?}", data_file.path);
                     }
 
@@ -627,7 +640,7 @@ impl DataCollection {
                      .progress_chars("=> ")
                      .template("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}")?
                     );
-        pb.set_message(format!("Fetching remote files..."));
+        pb.set_message("Fetching remote files...");
 
         // Convert remotes into Futures, so that they can be awaited in parallel
         let fetch_futures: Vec<_> = self.remotes.iter().map(|(path, remote)| {
@@ -947,9 +960,9 @@ impl DataCollection {
         }
 
         let style = ProgressBarOpts::new(
-                     Some("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}".to_string()),
-                     Some("=> ".to_string()),
-                     true, true);
+            Some("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}".to_string()),
+            Some("=> ".to_string()),
+            true, true);
 
         let style_clone = style.clone();
         let style_opts = StyleOptions::new(style, style_clone);
@@ -1000,7 +1013,13 @@ impl DataCollection {
 mod tests {
     use super::DataFile;
     use std::path::Path;
-    use anyhow::{anyhow,Result};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn mock_data_file() -> NamedTempFile {
+        let temp_file = NamedTempFile::new().unwrap();
+        temp_file
+    }
 
     #[tokio::test]
     async fn test_datafile_new_with_nonexistent_path() {
@@ -1017,6 +1036,95 @@ mod tests {
         };
     }
 
+    #[tokio::test]
+    async fn test_md5() {
+        let path_context = Path::new("");
+        let mut file = mock_data_file();
 
+        // Write some "data"
+        writeln!(file, "Mock data.").unwrap();
+
+        // Make a DataFile
+        let path = file.path().to_string_lossy().to_string();
+        let data_file = DataFile::new(path, &path_context).unwrap();
+
+        // Compare MD5s
+        let expected_md5 = "d3feb335769173b2db573413b0f6abf4".to_string();
+        let observed_md5 = data_file.get_md5(&path_context).unwrap().unwrap();
+        assert!(observed_md5 == expected_md5, "MD5 mismatch!");
+    }
+
+
+    #[tokio::test]
+    async fn test_size() {
+        let path_context = Path::new("");
+        let mut file = mock_data_file();
+
+        // Write some "data"
+        writeln!(file, "Mock data.").unwrap();
+
+        // Make a DataFile
+        let path = file.path().to_string_lossy().to_string();
+        let data_file = DataFile::new(path, &path_context).unwrap();
+
+        // Let's also check size
+        assert!(data_file.size == 11, "Size mismatch {:?} != {:?}!",
+                data_file.size, 11);
+    }
+
+
+
+    #[tokio::test]
+    async fn test_update_md5() {
+        let path_context = Path::new("");
+        let mut file = mock_data_file();
+
+        // Write some "data"
+        writeln!(file, "Mock data.").unwrap();
+
+        // Make a DataFile
+        let path = file.path().to_string_lossy().to_string();
+        let mut data_file = DataFile::new(path, &path_context).unwrap();
+
+        // Now, we change the data.
+        writeln!(file, "Modified mock data.").unwrap();
+
+        // Make sure the file MD5 is right
+        let expected_md5 = "c6526ab1de615b49e53398ae5588bd00".to_string();
+        let observed_md5 = data_file.get_md5(&path_context).unwrap().unwrap();
+        assert!(observed_md5 == expected_md5);
+
+        // Make sure the old MD5 is in the DataFile
+        let old_md5 = "d3feb335769173b2db573413b0f6abf4".to_string();
+        assert!(data_file.md5 == old_md5, "DataFile.md5 mismatch!");
+
+        // Now update
+        data_file.update_md5(path_context).unwrap();
+        assert!(data_file.md5 == expected_md5, "DataFile.update_md5() failed!");
+    }
+
+    #[tokio::test]
+    async fn test_update_size() {
+        let path_context = Path::new("");
+        let mut file = mock_data_file();
+
+        // Write some "data"
+        writeln!(file, "Mock data.").unwrap();
+
+        // Make a DataFile
+        let path = file.path().to_string_lossy().to_string();
+        let mut data_file = DataFile::new(path, &path_context).unwrap();
+
+        // Now, we change the data.
+        writeln!(file, "Modified mock data.").unwrap();
+
+        assert!(data_file.size == 11, "Initial size wrong!");
+
+        data_file.update_size(path_context).unwrap();
+        assert!(data_file.size == 31, "DataFile.update_size() wrong!");
+    }
+
+
+    // ==== Data Collection Tests
 
 }
