@@ -178,7 +178,6 @@ impl ZenodoAPI {
         };
         let token = auth_keys.get("zenodo".to_string())?;
         let base_url = base_url.unwrap_or(BASE_URL.to_string());
-        println!("Base URL in constructor: {:?}", base_url);
         Ok(ZenodoAPI { 
             base_url,
             name: name.to_string(), 
@@ -200,7 +199,6 @@ impl ZenodoAPI {
                                                                   headers: Option<HeaderMap>,
                                                                   data: Option<RequestData<T>>) -> Result<Response> {
 
-        println!("BASE_URL: {:?}", self.base_url);
         let url = format!("{}/{}?access_token={}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'), self.token);
         trace!("request URL: {:?}", &url);
 
@@ -265,7 +263,6 @@ impl ZenodoAPI {
     }
 
     pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
-        println!("self: {:?}", self);
         let id = self.deposition_id.ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))?;
         let url = format!("{}/{}/files", "/deposit/depositions", id);
         let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None, None).await?;
