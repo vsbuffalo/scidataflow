@@ -65,7 +65,7 @@ impl StatusEntry {
             (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Current)) => line.green().to_string(),
             (Some(true), Some(LocalStatusCode::Current), None) => line.green().to_string(),
             (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists)) => line.green().to_string(),
-            (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists)) => line.green().to_string(),
+            (Some(true), Some(LocalStatusCode::Current), Some(RemoteStatusCode::NotExists)) => line.yellow().to_string(),
             // not tracked, but on remote
             (Some(false), Some(LocalStatusCode::Current), Some(RemoteStatusCode::Current)) => line.cyan().to_string(),
             // not tracked, not on remote

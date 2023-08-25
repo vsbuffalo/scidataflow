@@ -1,4 +1,4 @@
-use anyhow::{anyhow,Result};
+use anyhow::{anyhow,Result,Context};
 use std::path::Path;
 use reqwest::{Method, header::{HeaderMap, HeaderValue, CONTENT_TYPE}};
 use reqwest::{Client, Response};
@@ -303,8 +303,39 @@ impl ZenodoAPI {
         // upload the file
         let file = tokio::fs::File::open(full_path).await?;
         let response = self.issue_request::<HashMap<String, String>>(Method::PUT, bucket_url, None, Some(RequestData::File(file))).await?;
-        let _info: ZenodoFileUpload = response.json().await?;
-        Ok(())
+        let info: ZenodoFileUpload = response.json().await?;
+
+        let msg = "After upload, the local and remote MD5s differed. SciDataFlow\n\
+                    automatically deletes the remote file in this case";
+
+        // let's compare the MD5s
+        let remote_md5 = info.checksum;
+        if remote_md5 != data_file.md5 {
+            let zenodo_file = self.file_exists(&info.key).await?;
+            match zenodo_file {
+                None => {
+                    // The MD5s disagree, but when we try to get the file, we also cannot
+                    // find it. This is an extreme corner case, likely due to issues on 
+                    // Zenodo's end
+                    Err(anyhow!("{}; however,\n\
+                                in trying this, the remote file could not be found. This \n\
+                                very likely reflects an internal error on Zenodo's end.\n\
+                                Please log into Zenodo.org and manaually delete the file \n\
+                                (if it exists) and try re-uploading.", msg))
+                },
+                Some(file) => {
+                    self.delete_article_file(&file).await
+                        .context(format!("{}. However, scidataflow encountered an error while \
+                                         trying to delete the file.", msg))?;
+                    Err(anyhow!("{}.\n\
+                                Please try re-uploading. If this problem persists, please\n\
+                                report it to Zenodo and file an issue at:\n\
+                                https://github.com/vsbuffalo/scidataflow/issues", msg))
+                }
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
@@ -511,7 +542,7 @@ mod tests {
                 .json_body(json!({
                     "key": "example_data_file.tsv",
                     "mimetype": "application/zip",
-                    "checksum": "md5:2942bfabb3d05332b66eb128e0842cff",
+                    "checksum": "2942bfabb3d05332b66eb128e0842cff",
                     "version_id": "38a724d3-40f1-4b27-b236-ed2e43200f85",
                     "size": 13264,
                     "created": "2020-02-26T14:20:53.805734+00:00",
