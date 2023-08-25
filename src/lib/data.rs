@@ -1136,7 +1136,7 @@ mod tests {
         let mut dc = DataCollection::new();
 
         let dir = "data/supplement".to_string();
-        let result = FigShareAPI::new("Test remote", None);
+        let result = FigShareAPI::new("Test remote", Some(FIGSHARE_BASE_URL.to_string()));
         assert!(result.is_ok(), "FigShareAPI::new() resulted in error: {:?}", result);
         let figshare = result.unwrap();
         assert!(figshare.get_base_url() == FIGSHARE_BASE_URL, "FigShareAPI.base_url is not correct!");
@@ -1146,7 +1146,7 @@ mod tests {
         assert!(dc.remotes.contains_key(&dir), "Remote not registered!");
 
         // Let's check that validate_remote_directory() is working
-        let figshare = FigShareAPI::new("Another test remote", None).unwrap();
+        let figshare = FigShareAPI::new("Another test remote", Some(FIGSHARE_BASE_URL.to_string())).unwrap();
         let result = dc.register_remote(&dir, Remote::FigShareAPI(figshare));
         check_error(result, "already tracked");
     }
