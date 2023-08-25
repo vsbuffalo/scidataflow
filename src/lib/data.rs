@@ -1013,11 +1013,11 @@ impl DataCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::lib::api::figshare::{FIGSHARE_BASE_URL,FigShareAPI, self};
+    use crate::lib::api::figshare::{FIGSHARE_BASE_URL,FigShareAPI};
     use crate::lib::remote::Remote;
     use crate::lib::test_utilities::check_error;
 
-    use super::{DataFile, DataCollection, DataCollectionMetadata};
+    use super::{DataFile, DataCollection};
     use std::path::Path;
     use std::io::Write;
     use tempfile::NamedTempFile;
