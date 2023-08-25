@@ -1137,7 +1137,7 @@ mod tests {
 
         let dir = "data/supplement".to_string();
         let result = FigShareAPI::new("Test remote", None);
-        assert!(result.is_ok(), "FigShareAPI::new() resulted in error!");
+        assert!(result.is_ok(), "FigShareAPI::new() resulted in error: {:?}", result);
         let figshare = result.unwrap();
         assert!(figshare.get_base_url() == FIGSHARE_BASE_URL, "FigShareAPI.base_url is not correct!");
         dc.register_remote(&dir, Remote::FigShareAPI(figshare)).unwrap();

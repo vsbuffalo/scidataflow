@@ -250,6 +250,10 @@ impl ZenodoAPI {
         self.bucket_url = info.links.bucket;
         Ok(())
     }
+
+    pub async fn file_exists(&self) -> Result<bool> {
+        Ok(true)
+    }
     
     #[allow(unused_variables)]
     pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
