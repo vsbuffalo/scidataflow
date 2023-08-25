@@ -211,8 +211,8 @@ impl<'a> FigShareUpload<'a> {
         if let Some(file) = existing_file {
             if !overwrite {
                 print_info!("FigShare::upload() found file '{}' in FigShare \
-                            Article ID={} file(s) associated with it. Since \
-                            overwrite=false, this file will not be deleted.",
+                            Article ID={}. Since overwrite=false, 
+                            this file will not be deleted and re-upload.",
                             name, article_id);
             } else {
                 info!("FigShare::upload() is deleting file '{}' since \
@@ -452,12 +452,12 @@ impl FigShareAPI {
     // Get all files from a FigShare Article, in a HashMap
     // with file name as keys.
     pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareFile>> {
-        let mut articles: Vec<FigShareFile> = self.get_files().await?;
-        let mut article_hash: HashMap<String,FigShareFile> = HashMap::new();
-        for article in articles.iter_mut() {
-            article_hash.insert(article.name.clone(), article.clone());
+        let mut files: Vec<FigShareFile> = self.get_files().await?;
+        let mut files_hash: HashMap<String,FigShareFile> = HashMap::new();
+        for file in files.iter_mut() {
+            files_hash.insert(file.name.clone(), file.clone());
         }
-        Ok(article_hash)
+        Ok(files_hash)
     }
 
     // Check if file exists, returning None if not,
