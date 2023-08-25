@@ -207,18 +207,24 @@ impl Remote {
 }
 
 pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
-    // Get they keys off disk
+    // Get the keys off disk
     let auth_keys = AuthKeys::new();
-    #[allow(clippy::single_match)]
+    let error_message = |service_name: &str, token_name: &str| {
+        format!("Expected {} access token not found.\n\n\
+                If you used 'sdf link', it should have saved this token in ~/.scidataflow_authkeys.yml.\n\
+                You will need to re-add this key manually, by adding a line to this file like:\n\
+                {}: <TOKEN>", service_name, token_name)
+    };
+
     match remote {
         Remote::FigShareAPI(ref mut fgsh_api) => {
             let token = auth_keys.keys.get("figshare").cloned()
-                .ok_or_else(|| anyhow::anyhow!("Expected figshare key not found"))?;
+                .ok_or_else(|| anyhow::anyhow!(error_message("FigShare", "figshare")))?;
             fgsh_api.set_token(token);
         },
         Remote::ZenodoAPI(ref mut znd_api) => {
             let token = auth_keys.keys.get("zenodo").cloned()
-                .ok_or_else(|| anyhow::anyhow!("Expected figshare key not found"))?;
+                .ok_or_else(|| anyhow::anyhow!(error_message("Zenodo", "zenodo")))?;
             znd_api.set_token(token);
         },
         // handle other Remote variants as necessary
@@ -226,6 +232,7 @@ pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
     }
     Ok(())
 }
+
 
 // Common enum for issue_request() methods of APIs
 #[derive(Debug)]

@@ -502,7 +502,7 @@ impl DataCollection {
             e.insert(data_file);
             Ok(())
         } else {
-            Err(anyhow!("File '{}' is already registered in the data manifest. \
+            Err(anyhow!("File '{}' is already registered in the data manifest.\n\
                         If you wish to update the MD5 or metadata, use: sdf update FILE",
                         &data_file.path))
         }
