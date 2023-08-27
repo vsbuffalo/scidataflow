@@ -13,7 +13,7 @@ use std::convert::TryInto;
 use crate::{print_info,print_warn};
 
 
-use crate::lib::{data::DataFile, project::LocalMetadata};
+use crate::lib::{data::{DataFile, MergedFile}, project::LocalMetadata, remote::DownloadInfo};
 use crate::lib::remote::{AuthKeys,RemoteFile,RequestData};
 
 
@@ -144,6 +144,14 @@ struct PrereserveDoi {
     recid: usize,
 }
 
+// Remove the BASE_URL from full URLs, e.g. for 
+// bucket_urls provided by Zenodo so they can go through the common 
+// issue_request() method
+fn remove_base_url(full_url: &str) -> Result<String> {
+    full_url.strip_prefix(BASE_URL).map(|s| s.to_string())
+        .ok_or(anyhow!("Internal error: Zenodo BASE_URL not found in full URL: full_url={:?}, BASE_URL={:?}",
+                       full_url, BASE_URL))
+}
 
 // for serde deserialize default
 fn zenodo_api_url() -> String {
@@ -209,15 +217,15 @@ impl ZenodoAPI {
 
         let client = Client::new();
         let mut request = client.request(method, &url);
-        info!("request: {:?}", request);
+        trace!("request: {:?}", request);
         if let Some(h) = headers {
-            info!("Request Headers: {:?}", h);
+            trace!("Request Headers: {:?}", h);
             request = request.headers(h);
         }
 
         if let Some(data) = &data { // Use the cloned data for logging
             let data_clone = data.clone(); // Clone the data
-            info!("Request Data: {:?}", data_clone);
+            trace!("Request Data: {:?}", data_clone);
         }
 
         let request = match data {
@@ -250,7 +258,7 @@ impl ZenodoAPI {
         let data = Some(RequestData::Json(metadata));
         let response = self.issue_request(Method::POST, "/deposit/depositions", Some(headers), data).await?;
         let info: ZenodoDeposition = response.json().await?;
-        info!("ZenodoDeposition: {:?}", info);
+        trace!("ZenodoDeposition: {:?}", info);
         self.deposition_id = Some(info.id as u64);
         self.bucket_url = info.links.bucket;
         Ok(())
@@ -277,14 +285,21 @@ impl ZenodoAPI {
         Ok(())
     }
 
+
+    // Upload the file, deleting any existing files if overwrite is true.
+    //
+    // Returns true/false if upload was completed or not. Will Error in other cases.
     #[allow(unused_variables)]
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
         let bucket_url = self.bucket_url.as_ref().ok_or(anyhow!("Internal Error: Zenodo bucket_url not set. Please report."))?;
         let full_path = path_context.join(&data_file.path);
 
         let name = data_file.basename()?;
         let existing_file = self.file_exists(&name).await?;
         let id = self.get_deposition_id()?;
+
+        let bucket_endpoint = remove_base_url(bucket_url)?;
+        let bucket_endpoint = format!("{}/{}", bucket_endpoint, name);
 
         // handle deleting files first if a file exists and overwrite is true
         if let Some(file) = existing_file {
@@ -293,6 +308,7 @@ impl ZenodoAPI {
                             Deposition ID={}. Since overwrite=false, 
                             this file will not be deleted and re-uploaded.",
                             name, id);
+                return Ok(false);
             } else {
                 info!("FigShare::upload() is deleting file '{}' since \
                       overwrite=true.", name);
@@ -302,12 +318,11 @@ impl ZenodoAPI {
 
         // upload the file
         let file = tokio::fs::File::open(full_path).await?;
-        let response = self.issue_request::<HashMap<String, String>>(Method::PUT, bucket_url, None, Some(RequestData::File(file))).await?;
+        let response = self.issue_request::<HashMap<String, String>>(Method::PUT, &bucket_endpoint, None, Some(RequestData::File(file))).await?;
         let info: ZenodoFileUpload = response.json().await?;
 
         let msg = "After upload, the local and remote MD5s differed. SciDataFlow\n\
                     automatically deletes the remote file in this case";
-
         // let's compare the MD5s
         let remote_md5 = info.checksum;
         if remote_md5 != data_file.md5 {
@@ -334,7 +349,8 @@ impl ZenodoAPI {
                 }
             }
         } else {
-            Ok(())
+            // we did the upload, MD5s match
+            Ok(true)
         }
     }
 
@@ -364,6 +380,38 @@ impl ZenodoAPI {
     }
 
 
+    // Get the RemoteFile.url and combine with the token to get
+    // a private download link.
+    //
+    // Note: this is overwrite-safe: it will error out 
+    // if file exists unless overwrite is true.
+    //
+    // Note: this *cannot* be moved to higher-level (e.g. Remote)
+    // since each API implements authentication its own way. 
+    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) 
+        -> Result<DownloadInfo> {
+            // if local DataFile is none, not in manifest; 
+            // do not download
+            let data_file = match &merged_file.local {
+                None => return Err(anyhow!("Cannot download() without local DataFile.")),
+                Some(file) => file
+            };
+            // check to make sure we won't overwrite
+            if data_file.is_alive(path_context) && !overwrite {
+                return Err(anyhow!("Data file '{}' exists locally, and would be \
+                                   overwritten by download. Use --overwrite to download.",
+                                   data_file.path));
+            }
+            // if no remote, there is nothing to download,
+            // silently return Ok. Get URL.
+            let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
+            let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
+
+            // add the token in
+            let url = format!("{}?access_token={}", url, self.token);
+            let save_path = &data_file.full_path(path_context)?;
+            Ok( DownloadInfo { url, path:save_path.to_string_lossy().to_string() })
+        }
 }
 
 #[cfg(test)]
@@ -446,7 +494,6 @@ mod tests {
 
         // Create an instance of ZenodoAPI
         let mut api = ZenodoAPI::new("test", Some(server.url("/"))).unwrap();
-        info!("Test ZenodoAPI: {:?}", api);
 
         // Main call to test
         let _result = api.remote_init(local_metadata).await;
@@ -487,7 +534,7 @@ mod tests {
 
         // Create an instance of your API class and set the deposition_id
         let mut api = ZenodoAPI::new("test", Some(server.url("/"))).unwrap();
-        info!("auth_keys: {:?}", api.token);
+        trace!("auth_keys: {:?}", api.token);
         api.deposition_id = Some(expected_deposition_id);
 
         // Main call to test
@@ -500,8 +547,7 @@ mod tests {
         delete_file_mock.assert();
     }
 
-    #[tokio::test]
-    async fn test_upload_no_ovewrite() {
+    async fn test_upload(file_exists: bool, overwrite: bool) -> Result<bool> {
         setup();
         // Start a mock server
         let server = MockServer::start();
@@ -514,37 +560,68 @@ mod tests {
         let temp_file_path = temp_file.path().to_owned();
 
         // (note: MD5s are fake, no checking with the mock server)
+        let temp_filename = temp_file_path.to_string_lossy().to_string();
+        let md5 = "2942bfabb3d05332b66eb128e0842cff";
+        let size = 1024;
         let data_file = DataFile {
-            path: temp_file_path.to_string_lossy().to_string(),
+            path: temp_filename.clone(),
             tracked: true,
-            md5: "2942bfabb3d05332b66eb128e0842cff".to_string(),
-            size: 1024,
+            md5: md5.to_string(),
+            size,
         };
 
         let path_context = Path::new("path/to/datafile");
         let expected_deposition_id = 1234564;
-        let bucket_url = "/files/568377dd-daf8-4235-85e1-a56011ad454b";
+        let bucket_endpoint = "/files/568377dd-daf8-4235-85e1-a56011ad454b";
+        let bucket_url = format!("{}/{}", BASE_URL, bucket_endpoint);
 
         // Mock for the get_files method
+        let mut remote_files = Vec::new();
+        let zenodo_file = ZenodoFile {
+            checksum: md5.clone().to_string(),
+            filename: data_file.basename()?,
+            filesize: size as usize,
+            id: "4242".to_string(),
+            links: ZenodoLinks::default()
+        };
+        if file_exists {
+            remote_files.push(zenodo_file.clone());
+        }
+
         let get_files_mock = server.mock(|when, then| {
             when.method(GET)
                 .path(format!("/deposit/depositions/{}/files", expected_deposition_id))
                 .query_param("access_token", TEST_TOKEN);
             then.status(200)
-                .json_body(json!([])); // Return an empty array if no existing files with that name
+                // return the files found, which depends on params of test
+                .json_body(json!(remote_files));
         });
+
+        // Mock for the delete_article_file method
+        let delete_file_mock = if file_exists && overwrite {
+            info!("delete_file_mock had been created");
+            Some(server.mock(|when, then| {
+                let expected_file_id = &zenodo_file.id;
+                when.method(DELETE)
+                    .path(format!("/deposit/depositions/{}/files/{}", expected_deposition_id, expected_file_id))
+                    .query_param("access_token", TEST_TOKEN);
+                then.status(204); // Typically, HTTP status 204 indicates that the server successfully processed the request and is not returning any content.
+            }))
+        } else {
+            None
+        };
 
         // Mock for the upload method
         let upload_file_mock = server.mock(|when, then| {
             when.method(PUT)
-                .path(bucket_url.clone());
+                .path_matches(Regex::new(&format!(r"{}/([^/]+)", bucket_endpoint)).unwrap());
             then.status(201)
                 .json_body(json!({
                     "key": "example_data_file.tsv",
                     "mimetype": "application/zip",
-                    "checksum": "2942bfabb3d05332b66eb128e0842cff",
+                    "checksum": md5,
                     "version_id": "38a724d3-40f1-4b27-b236-ed2e43200f85",
-                    "size": 13264,
+                    "size": size,
                     "created": "2020-02-26T14:20:53.805734+00:00",
                     "updated": "2020-02-26T14:20:53.811817+00:00",
                     "links": {
@@ -563,16 +640,42 @@ mod tests {
         api.bucket_url = Some(bucket_url.to_string());
 
         // Main call to test
-        let result = api.upload(&data_file, &path_context, false).await;
-
-        // Assert that the result is OK
-        assert!(result.is_ok(), "Err encountered in Zenodo::upload(): {:?}", result);
+        let result = api.upload(&data_file, &path_context, overwrite).await;
 
         // Ensure the specified mocks were called exactly one time (or fail).
         get_files_mock.assert();
-        upload_file_mock.assert();
+        if !file_exists {
+            upload_file_mock.assert();
+        }
+        if file_exists && overwrite {
+            upload_file_mock.assert();
+            delete_file_mock.unwrap().assert();
+        }
+        return result
     }
 
+    #[tokio::test]
+    async fn test_upload_no_overwrite_no_remote_files() -> Result<()> {
+        let result = test_upload(false, false).await?;
+        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
+                false, false, result);
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn test_upload_no_overwrite_with_remote_files() -> Result<()> {
+        let result = test_upload(true, false).await?;
+        assert!(!result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
+                true, false, result);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_upload_overwrite_with_remote_files() -> Result<()> {
+        let result = test_upload(true, true).await?;
+        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
+                true, true, result);
+        Ok(())
+    }
 }
 

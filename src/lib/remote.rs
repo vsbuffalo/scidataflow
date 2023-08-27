@@ -1,5 +1,5 @@
 use serde_yaml;
-use std::fs;
+use std::{fs, path};
 use std::fs::File;
 use std::path::Path;
 use std::io::Read;
@@ -153,6 +153,13 @@ pub enum Remote {
     ZenodoAPI(ZenodoAPI),
 }
 
+
+macro_rules! service_not_implemented {
+    ($service:expr) => {
+        Err(anyhow!("{} not implemented yet.", $service))
+    };
+}
+
 // NOTE: these are not implemented as traits because many are async, and
 // it looked like this wasn't implemented yet.
 impl Remote {
@@ -168,14 +175,14 @@ impl Remote {
         match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init(local_metadata).await,
             Remote::ZenodoAPI(znd_api) => znd_api.remote_init(local_metadata).await,
-            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
     pub async fn get_files(&self) -> Result<Vec<RemoteFile>> {
         match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.get_remote_files().await,
             Remote::ZenodoAPI(znd_api) => znd_api.get_remote_files().await,
-            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
     pub async fn get_files_hashmap(&self) -> Result<HashMap<String,RemoteFile>> {
@@ -187,11 +194,11 @@ impl Remote {
         }
         Ok(file_map)
     }
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
         match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.upload(data_file, path_context, overwrite).await,
-            Remote::ZenodoAPI(_) => Err(anyhow!("ZenodoAPI does not support get_project method")),
-            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+            Remote::ZenodoAPI(znd_api) => znd_api.upload(data_file, path_context, overwrite).await,
+            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
     // Get Download info: the URL (with token) and destination
@@ -201,7 +208,7 @@ impl Remote {
         match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.get_download_info(merged_file, path_context, overwrite),
             Remote::ZenodoAPI(_) => Err(anyhow!("ZenodoAPI does not support get_project method")),
-            Remote::DataDryadAPI(_) => Err(anyhow!("DataDryadAPI does not support get_project method")),
+            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
 }

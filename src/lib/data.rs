@@ -812,7 +812,9 @@ impl DataCollection {
                     // we should overwrite (TODO)
                     let do_upload = match merged_file.status(path_context)? {
                         RemoteStatusCode::NoLocal => {
-                            return Err(anyhow!("Internal error: execution should not have reached this point, please report."));
+                            // A file exists on the remote, but not locally: there 
+                            // is nothing to push in this case (or count!)
+                            false 
                         },
                         RemoteStatusCode::Current => {
                             current_skipped.push(path);
@@ -887,6 +889,7 @@ impl DataCollection {
         if !messy_skipped.is_empty() {
             println!("  Local is \"messy\" (manifest and file disagree): {}",
             pluralize(messy_skipped.len() as u64, "file"));
+            println!("  Use 'sdf update <FILE>' to add the current version to the manifest.");
             for path in messy_skipped {
                 println!("   - {:}", path);
             }
@@ -909,13 +912,16 @@ impl DataCollection {
         let mut overwrite_skipped = Vec::new();
 
         for (dir, merged_files) in all_files.iter() {
+            // can_download() is true only if local and remote are not None.
+            // (local file can be deleted, but will only be None if not in manifest also)
             for merged_file in merged_files.values().filter(|f| f.can_download()) {
 
                 let path = merged_file.name()?;
 
                 let do_download = match merged_file.status(path_context)? {
                     RemoteStatusCode::NoLocal => {
-                        return Err(anyhow!("Internal error: execution should not have reached this point, please report."));
+                        return Err(anyhow!("Internal error: execution should not have reached this point, please report.\n\
+                                           'sdf pull' filtered by MergedFile.can_download() but found a RemoteStatusCode::NoLocal status."));
                     },
                     RemoteStatusCode::Current => {
                         current_skipped.push(path);
@@ -1000,6 +1006,7 @@ impl DataCollection {
         if !messy_skipped.is_empty() {
             println!("  Local is \"messy\" (manifest and file disagree): {}",
             pluralize(messy_skipped.len() as u64, "file"));
+            println!("  Use 'sdf update <FILE>' to add the current version to the manifest.");
             for path in messy_skipped {
                 println!("   - {:}", path);
             }

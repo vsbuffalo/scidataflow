@@ -357,10 +357,10 @@ impl FigShareAPI {
         })
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
         let this_upload = FigShareUpload::new(self);
         this_upload.upload(data_file, path_context, overwrite).await?;
-        Ok(())
+        Ok(true)
     }
 
     // Get the RemoteFile.url and combine with the token to get
@@ -541,7 +541,7 @@ mod tests {
         info!("auth_keys: {:?}", api.token);
         // Call the create_article method
         let result = api.create_article(title).await;
-        
+
         // Check the result
         assert_eq!(result.is_ok(), true);
         let article = result.unwrap();
