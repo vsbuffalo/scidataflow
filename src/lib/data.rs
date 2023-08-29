@@ -2,8 +2,8 @@ use std::path::{PathBuf,Path};
 use anyhow::{anyhow,Result};
 use std::fs::{metadata};
 use serde_derive::{Serialize,Deserialize};
-use serde::ser::SerializeMap;
 use serde;
+use crate::lib::data::serde::{Serializer,Deserializer};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use chrono::prelude::*;
@@ -441,23 +441,8 @@ impl DataFile {
     }
 }
 
-fn ordered_map<K, V, S>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-where
-K: serde::Serialize + Ord,
-V: serde::Serialize,
-S: serde::ser::Serializer,
-{
-    let mut ordered: Vec<_> = value.iter().collect();
-    ordered.sort_by_key(|a| a.0);
 
-    let mut map = serializer.serialize_map(Some(ordered.len()))?;
-    for (k, v) in ordered {
-        map.serialize_entry(k, v)?;
-    }
-    map.end()
-}
-
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
 pub struct DataCollectionMetadata {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -465,14 +450,63 @@ pub struct DataCollectionMetadata {
 
 /// DataCollection structure for managing the data manifest 
 /// and how it talks to the outside world.
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct DataCollection {
-    #[serde(serialize_with = "ordered_map")]
     pub files: HashMap<String, DataFile>,
-    #[serde(serialize_with = "ordered_map")]
     pub remotes: HashMap<String, Remote>, // key is tracked directory
     pub metadata: DataCollectionMetadata,
 }
+
+#[derive(Debug, Serialize, Deserialize, Default, PartialEq, Clone)]
+pub struct MinimalDataCollection {
+    pub files: Vec<DataFile>,
+    pub remotes: HashMap<String, Remote>,
+    pub metadata: DataCollectionMetadata,
+
+}
+
+impl serde::Serialize for DataCollection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            // Serialize `files` as a sorted vector
+            let sorted_files: Vec<DataFile> = self.files.values().cloned().collect();
+
+            // Construct a new struct to hold the serializable parts
+            let to_serialize = MinimalDataCollection {
+                files: sorted_files,
+                remotes: self.remotes.clone(),
+                metadata: self.metadata.clone(),
+            };
+
+            to_serialize.serialize(serializer)
+        }
+}
+
+impl<'de> serde::Deserialize<'de> for DataCollection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            // Deserialize into a temporary struct
+            let temp = MinimalDataCollection::deserialize(deserializer)?;
+
+            // Build the HashMap for files based on the path
+            let files = temp
+                .files
+                .into_iter()
+                .map(|df| (df.path.clone(), df))
+                .collect();
+
+            Ok(DataCollection {
+                files,
+                remotes: temp.remotes,
+                metadata: temp.metadata,
+            })
+        }
+}
+
 
 /// DataCollection methods: these should *only* be for 
 /// interacting with the data manifest (including remotes).

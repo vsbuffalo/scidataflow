@@ -51,10 +51,14 @@ anywhere with the commands:
 
  - [x] FigShare
  - [ ] Data Dryad
- - [ ] Zenodo
+ - [x] Zenodo
  - [ ] static remotes (i.e. just URLs)
 
 ## TODO 
+
+ - remote_init for zenodo needs to check for existing.
+
+ - link_only should propagate remote IDs, etc
 
  - we need to be more strict about whether the remotes have files that 
    are listed as tracked in *subdirectories*. E.g. we should, when a 

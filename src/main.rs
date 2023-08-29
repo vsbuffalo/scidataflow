@@ -104,7 +104,12 @@ enum Commands {
         key: String,
         /// project name for remote (default: directory name)
         #[structopt(long)]
-        name: Option<String>
+        name: Option<String>,
+
+        /// don't initialize remote, only add to manifest
+        #[structopt(long)]
+        link_only: bool
+
     },
 
     #[structopt(name = "ls")]
@@ -193,9 +198,9 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.update(filename.as_ref())
         }
-        Some(Commands::Link { dir, service, key, name }) => {
+        Some(Commands::Link { dir, service, key, name, link_only }) => {
             let mut proj = Project::new()?;
-            proj.link(dir, service, key, name).await
+            proj.link(dir, service, key, name, link_only).await
         }
         Some(Commands::Ls {}) => {
             let mut proj = Project::new()?;

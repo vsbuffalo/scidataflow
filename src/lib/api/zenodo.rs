@@ -159,7 +159,7 @@ fn zenodo_api_url() -> String {
 }
 
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ZenodoAPI {
     #[serde(skip_serializing, skip_deserializing,default="zenodo_api_url")]
     base_url: String,
@@ -252,6 +252,7 @@ impl ZenodoAPI {
     // For Zenodo, this creates a new "deposition"
     #[allow(unused)]
     pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
+        // TODO URGENT: check for existing entries!
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let metadata: ZenodoDepositionData = local_metadata.try_into()?;

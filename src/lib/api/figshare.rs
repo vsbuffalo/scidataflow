@@ -37,7 +37,7 @@ fn figshare_api_url() -> String {
     FIGSHARE_BASE_URL.to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct FigShareAPI {
     #[serde(skip_serializing, skip_deserializing,default="figshare_api_url")]
     base_url: String,

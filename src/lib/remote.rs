@@ -146,7 +146,7 @@ impl AuthKeys {
     }
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Remote {
     FigShareAPI(FigShareAPI),
     DataDryadAPI(DataDryadAPI),

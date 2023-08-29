@@ -305,7 +305,7 @@ impl Project {
     }
 
     pub async fn link(&mut self, dir: &str, service: &str, 
-                      key: &str, name: &Option<String>) -> Result<()> {
+                      key: &str, name: &Option<String>, link_only: &bool) -> Result<()> {
         // (0) get the relative directory path
         let dir = self.relative_path_string(Path::new(dir))?;
 
@@ -337,13 +337,15 @@ impl Project {
         // is already done.
         self.data.validate_remote_directory(&dir)?;
 
-        // (5) initialize the remote (e.g. for FigShare, this
-        // checks that the article doesn't exist (error if it
-        // does), creates it, and sets the FigShare.article_id 
-        // once it is assigned by the remote).
-        // Note: we pass the Project to remote_init
-        let local_metadata = LocalMetadata::from_project(self);
-        remote.remote_init(local_metadata).await?;
+        if !link_only {
+            // (5) initialize the remote (e.g. for FigShare, this
+            // checks that the article doesn't exist (error if it
+            // does), creates it, and sets the FigShare.article_id 
+            // once it is assigned by the remote).
+            // Note: we pass the Project to remote_init
+            let local_metadata = LocalMetadata::from_project(self);
+            remote.remote_init(local_metadata).await?;
+        }
 
         // (6) register the remote in the manifest
         self.data.register_remote(&dir, remote)?;
