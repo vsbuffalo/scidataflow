@@ -624,7 +624,7 @@ impl DataCollection {
         }
     }
     pub fn track_file(&mut self, filepath: &String) -> Result<()> {
-        debug!("complete files: {:?}", self.files);
+        trace!("complete files: {:?}", self.files);
         let data_file = self.files.get_mut(filepath);
 
         // extract the directory from the filepath
@@ -639,7 +639,14 @@ impl DataCollection {
         match data_file {
             None => Err(anyhow!("Data file '{}' is not in the data manifest. Add it first using:\n \
                                 $ sdf track {}\n", filepath, filepath)),
-            Some(data_file) => data_file.set_tracked()
+            Some(data_file) => {
+                let path = Path::new(filepath);
+                let file_size = data_file.get_size(path)?;
+                if file_size == 0 {
+                    return Err(anyhow!("Cannot track an empty file, and '{}' has a file size of 0.", filepath));
+                }
+                data_file.set_tracked()
+            }
         }
     }
     pub fn untrack_file(&mut self, filepath: &String) -> Result<()> {

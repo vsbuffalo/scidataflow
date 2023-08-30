@@ -14,6 +14,7 @@ use colored::*;
 use crate::lib::data::StatusEntry;
 use crate::lib::remote::Remote;
 
+pub const ISSUE_URL: &str = "https://github.com/vsbuffalo/scidataflow/issues";
 
 pub fn load_file(path: &PathBuf) -> String {
     let mut file = File::open(path).expect("unable to open file");
@@ -262,7 +263,7 @@ pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     format!("{} ({})", timestamp, formatter.convert(std_duration))
 }
 
-fn shorten(hash: &String, abbrev: Option<i32>) -> String {
+pub fn shorten(hash: &String, abbrev: Option<i32>) -> String {
     let n = abbrev.unwrap_or(hash.len() as i32) as usize;
     hash.chars().take(n).collect()
 }
