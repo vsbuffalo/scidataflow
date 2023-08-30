@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use serde_derive::{Serialize,Deserialize};
 use serde_json::Value;
 use reqwest::{Method, header::{HeaderMap, HeaderValue}};
-use reqwest::{Client, Response};
+use reqwest::{Client, Response, Body};
 use colored::Colorize;
 use futures_util::StreamExt;
 use tokio::fs::File;
@@ -26,6 +26,8 @@ use crate::{print_info,print_warn};
 use crate::lib::data::{DataFile, MergedFile};
 use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
 use crate::lib::project::LocalMetadata;
+
+use super::zenodo::ZenodoDeposition;
 
 pub const FIGSHARE_BASE_URL: &str = "https://api.figshare.com/v2/";
 
@@ -304,6 +306,11 @@ impl FigShareAPI {
             Some(RequestData::Json(json_data)) => request.json(&json_data),
             Some(RequestData::Binary(bin_data)) => request.body(bin_data),
             Some(RequestData::File(file)) => request.body(file),
+            Some(RequestData::Stream(file)) => {
+                let stream = tokio_util::io::ReaderStream::new(file);
+                let body = Body::wrap_stream(stream);
+                request.body(body)
+            },
             Some(RequestData::Empty) => request.json(&serde_json::Value::Object(serde_json::Map::new())),
             None => request,
         };
@@ -407,26 +414,39 @@ impl FigShareAPI {
         Ok(())
     }
 
+    pub async fn find_article(&self) -> Result<Option<FigShareArticle>> {
+        let articles = self.get_articles().await?;
+        let matches_found: Vec<_> = articles.into_iter().filter(|a| a.title == self.name).collect();
+        if !matches_found.is_empty() {
+            if matches_found.len() > 1 {
+                return Err(anyhow!("Found multiple FigShare Articles with the \
+                                   title '{}'", self.name));
+            } else {
+                return Ok(Some(matches_found[0].clone()));
+            }
+        } else {
+            return Ok(None);
+        }
+    }
+
     // FigShare Remote initialization
     // 
     // This creates a FigShare article for the tracked directory.
     #[allow(unused)]
-    pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
+    pub async fn remote_init(&mut self, local_metadata: LocalMetadata, link_only: bool) -> Result<()> {
         // (1) Let's make sure there is no Article that exists
         // with this same name
-        let articles = self.get_articles().await?;
-
-        let matches_found: Vec<_> = articles.iter().filter(|&a| a.title == self.name).collect();
-
-        if !matches_found.is_empty() {
-            return Err(anyhow!("An existing FigShare Article with the title \
-                               '{}' was found. Either delete it on figshare.com \
-                               or chose a different name.", self.name));
-        }
-
-        // (2) Now that no Article name clash has occurred, let's
-        // create the new article and get the ID
-        let article = self.create_article(&self.name).await?;
+        let found_match = self.find_article().await?;
+        let article = if let Some(existing_info) = found_match {
+            if !link_only {
+                return Err(anyhow!("An existing FigShare Article with the title \
+                                   '{}' was found. Use --link-only to link.", self.name));
+            }
+            existing_info
+        } else {
+            // Step 2: Create a new deposition if none exists
+            self.create_article(&self.name).await?
+        };
 
         // (3) Set the Article ID, which is the only state needed
         // for later queries

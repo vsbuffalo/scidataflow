@@ -171,10 +171,10 @@ impl Remote {
         }
     }
     // initialize the remote (i.e. tell it we have a new empty data set)
-    pub async fn remote_init(&mut self, local_metadata: LocalMetadata) -> Result<()> {
+    pub async fn remote_init(&mut self, local_metadata: LocalMetadata, link_only: bool) -> Result<()> {
         match self {
-            Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init(local_metadata).await,
-            Remote::ZenodoAPI(znd_api) => znd_api.remote_init(local_metadata).await,
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init(local_metadata, link_only).await,
+            Remote::ZenodoAPI(znd_api) => znd_api.remote_init(local_metadata, link_only).await,
             Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
@@ -242,11 +242,15 @@ pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
 
 
 // Common enum for issue_request() methods of APIs
+//
+// Notes: Binary() should be used only for small amounts of data, 
+// that can be read into memory, e.g. FigShare's upload_parts().
 #[derive(Debug)]
 pub enum RequestData<T: serde::Serialize> {
     Json(T),
     Binary(Vec<u8>),
     File(tokio::fs::File),
+    Stream(tokio::fs::File),
     Empty
 }
 

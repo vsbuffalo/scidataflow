@@ -69,6 +69,7 @@ pub struct Config {
 // that Remote.remote_init() can access, so we can pass
 // a single object to Remote.remote_init(). E.g. includes
 // User and DataCollectionMetadata.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct LocalMetadata {
     pub author_name: Option<String>,
     pub email: Option<String>,
@@ -138,7 +139,15 @@ impl Project {
 
     }
 
+
+    // This tries to figure out a good default name to use, e.g. for 
+    // remote titles or names. 
+    //
+    // The precedence is local metadata in manifest > project directory
     pub fn name(&self) -> String {
+        if let Some(t) = &self.data.metadata.title {
+            return t.to_string();
+        }
         Project::get_parent_dir(&self.manifest)
     }
 
@@ -315,9 +324,10 @@ impl Project {
 
         // (2) create a new remote, with a name
         // Associate a project (either by creating it, or finding it on FigShare)
-        let name = match name {
-            None => self.name(),
-            Some(n) => n.to_string()
+        let name = if let Some(n) = name {
+            n.to_string() 
+        } else {
+            self.name()
         };
 
         let service = service.to_lowercase();
@@ -337,15 +347,13 @@ impl Project {
         // is already done.
         self.data.validate_remote_directory(&dir)?;
 
-        if !link_only {
-            // (5) initialize the remote (e.g. for FigShare, this
-            // checks that the article doesn't exist (error if it
-            // does), creates it, and sets the FigShare.article_id 
-            // once it is assigned by the remote).
-            // Note: we pass the Project to remote_init
-            let local_metadata = LocalMetadata::from_project(self);
-            remote.remote_init(local_metadata).await?;
-        }
+        // (5) initialize the remote (e.g. for FigShare, this
+        // checks that the article doesn't exist (error if it
+        // does), creates it, and sets the FigShare.article_id 
+        // once it is assigned by the remote).
+        // Note: we pass the Project to remote_init
+        let local_metadata = LocalMetadata::from_project(self);
+        remote.remote_init(local_metadata, *link_only).await?;
 
         // (6) register the remote in the manifest
         self.data.register_remote(&dir, remote)?;

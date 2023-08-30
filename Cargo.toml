@@ -46,4 +46,5 @@ lazy_static = "1.4.0"
 httpmock = "0.6.8"
 cd = "0.2.1"
 indicatif = { version = "0.17.6", features = ["futures"] }
+tokio-util = { version = "0.7.8", features = ["codec"] }
 
