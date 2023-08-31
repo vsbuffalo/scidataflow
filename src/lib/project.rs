@@ -12,7 +12,7 @@ use dirs;
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
 use crate::lib::data::{DataFile,DataCollection};
-use crate::lib::utils::{load_file,print_status};
+use crate::lib::utils::{load_file,print_status, pluralize};
 use crate::lib::remote::{AuthKeys,authenticate_remote};
 use crate::lib::remote::Remote;
 use crate::lib::api::figshare::FigShareAPI;
@@ -171,6 +171,17 @@ impl Project {
         Ok(())
     }
 
+    // TODO could add support for other metadata here
+    pub fn set_metadata(&mut self, title: &Option<String>, description: &Option<String>) -> Result<()> {
+        if let Some(new_title) = title {
+            self.data.metadata.title = Some(new_title.to_string());
+        }
+        if let Some(new_description) = description {
+            self.data.metadata.description = Some(new_description.to_string());
+        }
+        self.save()
+    }
+
     pub fn set_config(name: &Option<String>, email: &Option<String>, affiliation: &Option<String>) -> Result<()> {
         let mut config = Project::load_config().unwrap_or_else(|_| Config {
             user: User {
@@ -254,13 +265,13 @@ impl Project {
         Ok(self.relative_path(path)?.to_string_lossy().to_string())
     }
 
-    pub async fn status(&mut self, include_remotes: bool) -> Result<()> {
+    pub async fn status(&mut self, include_remotes: bool, all: bool) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.
         let path_context = &canonicalize(self.path_context())?;
         let status_rows = self.data.status(path_context, include_remotes).await?;
         //let remotes: Option<_> = include_remotes.then(|| &self.data.remotes);
-        print_status(status_rows, Some(&self.data.remotes));
+        print_status(status_rows, Some(&self.data.remotes), all);
         Ok(())
     }
 
@@ -298,12 +309,12 @@ impl Project {
         let mut num_added = 0;
         for filepath in files {
             let filename = self.relative_path_string(Path::new(&filepath.clone()))?;
-            let data_file = DataFile::new(filename.clone(), &self.path_context())?;
+            let data_file = DataFile::new(filename.clone(), None, &self.path_context())?;
             info!("Adding file '{}'.", filename);
             self.data.register(data_file)?;
             num_added += 1;
         }
-        println!("Added {} files.", num_added);
+        println!("Added {}.", pluralize(num_added as u64, "file"));
         self.save()
     }
 
@@ -371,6 +382,18 @@ impl Project {
         Ok(())
     }
 
+    pub async fn get(&mut self, url: &str, filename: &str) -> Result<()> {
+        let data_file = DataFile::new(filename.to_string(), Some(url), &self.path_context())?;
+        info!("Adding file '{}'.", filename);
+        self.data.register(data_file)?;
+        Ok(())
+    }
+
+    pub async fn get_from_file(&mut self, filename: &str, column: u64) -> Result<()> {
+        // TODO
+        Ok(())
+    }
+
     pub fn untrack(&mut self, filepath: &String) -> Result<()> {
         let filepath = self.relative_path_string(Path::new(filepath))?;
         self.data.untrack_file(&filepath)?;
@@ -379,7 +402,7 @@ impl Project {
 
     pub fn track(&mut self, filepath: &String) -> Result<()> {
         let filepath = self.relative_path_string(Path::new(filepath))?;
-        self.data.track_file(&filepath)?;
+        self.data.track_file(&filepath, &self.path_context())?;
         self.save()
     }
 

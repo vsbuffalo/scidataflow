@@ -121,7 +121,9 @@ pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Optio
  */
 // More specialized version of print_fixed_width() for statuses.
 // Handles coloring, manual annotation, etc 
-pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
+pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, 
+                                indent: Option<usize>, color: bool, all: bool) {
+    //debug!("rows: {:?}", rows);
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
 
@@ -130,7 +132,7 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
     // get the max number of columns (in case ragged) 
     let max_cols = rows.values()
         .flat_map(|v| v.iter())
-        .filter_map(|entry| entry.columns(abbrev).ok().map(|cols| cols.len()))
+        .map(|entry| entry.columns(abbrev).len())
         .max()
         .unwrap_or(0);
 
@@ -138,35 +140,38 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
 
     // compute max lengths across all rows
     for status in rows.values().flat_map(|v| v.iter()) {
-        if let Ok(cols) = status.columns(abbrev) { // Assuming columns returns Result<Vec<String>>
-            for (i, col) in cols.iter().enumerate() {
-                max_lengths[i] = max_lengths[i].max(col.len()); // Assuming col is a string
-            }
+        let cols = status.columns(abbrev); 
+        for (i, col) in cols.iter().enumerate() {
+            max_lengths[i] = max_lengths[i].max(col.len()); // Assuming col is a string
         }
     }
 
     // print status table
-    let mut keys: Vec<&String> = rows.keys().collect();
-    keys.sort();
-    for (key, value) in &rows {
+    let mut dir_keys: Vec<&String> = rows.keys().collect();
+    dir_keys.sort();
+    for key in dir_keys {
+        let statuses = &rows[key];
         let pretty_key = if color { key.bold().to_string() } else { key.clone() };
         println!("[{}]", pretty_key);
 
         // Print the rows with the correct widths
-        for status in value {
-            if let Ok(cols) = status.columns(abbrev) {
-                let mut fixed_row = Vec::new();
-                for (i, col) in cols.iter().enumerate() {
-                    // push a fixed-width column to vector
-                    let spacer = if i == 0 { " " } else { "" };
-                    let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
-                    fixed_row.push(fixed_col);
-                }
-                let spacer = " ".repeat(nspaces);
-                let line = fixed_row.join(&spacer);
-                let status_line = if color { status.color(line) } else { line.to_string() };
-                println!("{}{}", " ".repeat(indent), status_line);
+        for status in statuses {
+            if status.local_status.is_none() && !all {
+                // ignore things that aren't in the manifest, unless --all
+                continue;
             }
+            let cols = status.columns(abbrev);
+            let mut fixed_row = Vec::new();
+            for (i, col) in cols.iter().enumerate() {
+                // push a fixed-width column to vector
+                let spacer = if i == 0 { " " } else { "" };
+                let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
+                fixed_row.push(fixed_col);
+            }
+            let spacer = " ".repeat(nspaces);
+            let line = fixed_row.join(&spacer);
+            let status_line = if color { status.color(line) } else { line.to_string() };
+            println!("{}{}", " ".repeat(indent), status_line);
         }
         println!();
     }
@@ -199,10 +204,49 @@ pub fn pluralize<T: Into<u64>>(count: T, noun: &str) -> String {
     }
 }
 
-pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>) {
+struct FileCounts {
+    local: u64,
+    remote: u64,
+    both: u64,
+    total: u64
+}
+
+fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
+    let mut local = 0;
+    let mut remote = 0;
+    let mut both = 0;
+    let mut total = 0;
+    for files in rows.values() {
+        for file in files {
+            total += 1;
+            match (&file.local_status, &file.remote_status) {
+                (None, None) => {
+                    return Err(anyhow!("Internal Error: get_counts found a file with both local/remote set to None."));
+                },
+                (Some(_), None) => {
+                    local += 1;
+                }, 
+                (None, Some(_)) => {
+                    remote += 1;
+                },
+                (Some(_), Some(_)) => {
+                    both += 1;
+                }
+            }
+        }
+    }
+    Ok(FileCounts { local, remote, both, total })
+}
+
+pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>,
+                    all: bool) {
     println!("{}", "Project data status:".bold());
-    let total: usize = rows.values().map(|v| v.len()).sum();
-    println!("{} registered.\n", pluralize(total as u64, "data file"));
+    let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
+    println!("{} on local and remotes ({} only local, {} only remote), {} total.\n", 
+             pluralize(counts.both as u64, "file"),
+             pluralize(counts.local as u64, "file"),
+             pluralize(counts.remote as u64, "file"),
+             pluralize(counts.total as u64, "file"));
 
     // this brings the remote name (if there is a corresponding remote) into 
     // the key, so the linked remote can be displayed in the status 
@@ -222,7 +266,7 @@ pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&Has
         None => rows,
     };
 
-    print_fixed_width_status(rows_by_dir, None, None, true);
+    print_fixed_width_status(rows_by_dir, None, None, true, all);
 }
 
 pub fn format_bytes(size: u64) -> String {

@@ -85,10 +85,10 @@ impl StatusEntry {
             }
         }
     }
-    pub fn columns(&self, abbrev: Option<i32>) -> Result<Vec<String>> {
+    pub fn columns(&self, abbrev: Option<i32>) -> Vec<String> {
         let local_status = &self.local_status;
 
-        let md5_string = self.local_md5_column(abbrev)?;
+        let md5_string = self.local_md5_column(abbrev).expect("Internal Error: StatusEntry::local_md5_column().");
 
         let mod_time_pretty = self.local_mod_time.map(format_mod_time).unwrap_or_default();
 
@@ -105,7 +105,7 @@ impl StatusEntry {
             (false, _) => "".to_string(),
             (true, Some(true)) => ", tracked".to_string(),
             (true, Some(false)) => ", untracked".to_string(),
-            (_, _) => return Err(anyhow!("Invalid tracking state"))
+            (true, None) => ", not in manifest".to_string()
         };
         let mut columns = vec![
             self.name.clone(),
@@ -119,7 +119,8 @@ impl StatusEntry {
                 Some(RemoteStatusCode::Current) => "identical remote".to_string(),
                 Some(RemoteStatusCode::MessyLocal) => "messy local".to_string(),
                 Some(RemoteStatusCode::Different) => {
-                    format!("different remote version ({:})", self.remote_md5_column(abbrev)?)
+                    let remote_md5 = self.remote_md5_column(abbrev).expect("Internal Error: StatusEntry::remote_md5_column().");
+                    format!("different remote version ({:})", remote_md5)
                 },
                 Some(RemoteStatusCode::NotExists) => "not on remote".to_string(),
                 Some(RemoteStatusCode::NoLocal) => "unknown (messy remote)".to_string(),
@@ -129,8 +130,7 @@ impl StatusEntry {
             };
             columns.push(remote_status_msg.to_string());
         }
-
-        Ok(columns)
+        columns
     }
 }
 
@@ -140,6 +140,7 @@ pub struct DataFile {
     pub tracked: bool,
     pub md5: String,
     pub size: u64,
+    pub url: Option<String>
     //modified: Option<DateTime<Utc>>,
 }
 
@@ -316,7 +317,7 @@ impl MergedFile {
 
 
 impl DataFile {
-    pub fn new(path: String, path_context: &Path) -> Result<DataFile> {
+    pub fn new(path: String, url: Option<&str>, path_context: &Path) -> Result<DataFile> {
         let full_path = path_context.join(&path);
         if !full_path.exists() {
             return Err(anyhow!("File '{}' does not exist.", path))
@@ -328,11 +329,13 @@ impl DataFile {
         let size = metadata(full_path)
             .map_err(|err| anyhow!("Failed to get metadata for file {:?}: {}", path, err))?
             .len();
+        let maybe_url: Option<String> = url.map(|s| s.to_string());
         Ok(DataFile {
             path,
             tracked: false, 
             md5,
             size,
+            url: maybe_url,
         })
     }
 
@@ -623,7 +626,7 @@ impl DataCollection {
             None => Err(anyhow!("No such remote")),
         }
     }
-    pub fn track_file(&mut self, filepath: &String) -> Result<()> {
+    pub fn track_file(&mut self, filepath: &String, path_context: &Path) -> Result<()> {
         trace!("complete files: {:?}", self.files);
         let data_file = self.files.get_mut(filepath);
 
@@ -640,8 +643,9 @@ impl DataCollection {
             None => Err(anyhow!("Data file '{}' is not in the data manifest. Add it first using:\n \
                                 $ sdf track {}\n", filepath, filepath)),
             Some(data_file) => {
-                let path = Path::new(filepath);
-                let file_size = data_file.get_size(path)?;
+                // check that the file isn't empty 
+                // (this is why a path_context is needed)
+                let file_size = data_file.get_size(&path_context)?;
                 if file_size == 0 {
                     return Err(anyhow!("Cannot track an empty file, and '{}' has a file size of 0.", filepath));
                 }

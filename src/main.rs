@@ -54,21 +54,23 @@ enum Commands {
         filenames: Vec<String>,
     },
      #[structopt(name = "config")]
-    /// Set local configuration settings (e.g. name), which 
+    /// Set local system-wide metadata (e.g. your name, email, etc.), which 
     /// can be propagated to some APIs.
     Config {
-        /// Your name (required if not previously set)
+        /// Your name.
         #[structopt(long)]
         name: Option<String>,
+        // Your email.
         #[structopt(long)]
         email: Option<String>,
+        // Your affiliation.
         #[structopt(long)]
         affiliation: Option<String>,
     },
     #[structopt(name = "init")]
     /// Initialize a new project.
     Init {
-        /// project name (default: the name of the directory)
+        /// Project name (default: the name of the directory).
         #[structopt(long)]
         name: Option<String>
     },
@@ -76,13 +78,18 @@ enum Commands {
     #[structopt(name = "status")]
     /// Show status of data.
     Status {
-        /// Show remotes status
+        /// Show remotes status (requires network).
         #[structopt(long)]
-        remotes: bool
+        remotes: bool, 
+
+        /// Show statuses of all files, including those on remote(s) but not in the manifest.
+        #[structopt(long)]
+        all: bool
+
     },
 
     #[structopt(name = "stats")]
-    /// Show status of data.
+    /// Show file size statistics.
     Stats {
     },
 
@@ -96,45 +103,43 @@ enum Commands {
     #[structopt(name = "link")]
     /// Link a directory to a remote storage solution.
     Link {
-        /// directory to link to remote storage.
+        /// Directory to link to remote storage.
         dir: String,
-        /// the service to use (currently only FigShare).
+        /// The data repository service to use (either 'figshare' or 'zenodo').
         service: String,
-        /// the authentication token.
+        /// The authentication token.
         key: String,
-        /// project name for remote (default: directory name)
+        /// Project name for remote (default: the metadata title in the data 
+        /// manifest, or if that's not set, the directory name).
         #[structopt(long)]
         name: Option<String>,
 
-        /// don't initialize remote, only add to manifest
+        /// Don't initialize remote, only add to manifest. This will retrieve
+        /// the remote information (i.e. the FigShare Article ID or Zenodo
+        /// Depository ID) to add to the manifest. Requires network.
         #[structopt(long)]
         link_only: bool
 
     },
 
-    #[structopt(name = "ls")]
-    /// List remotes.
-    Ls {
-    },
-
     #[structopt(name = "untrack")]
     /// No longer keep track of this file on the remote.
     Untrack {
-        /// the file to untrack with remote.
+        /// The file to untrack with remote.
         filename: String
     },
 
     #[structopt(name = "track")]
     /// Keep track of this file on the remote.
     Track {
-        /// the file to track with remote.
+        /// The file to track with remote.
         filename: String
     },
 
     #[structopt(name = "push")]
     /// Push all tracked files to remote.
     Push {
-        // Overwrite local files?
+        // Overwrite remote files if they exit.
         #[structopt(long)]
         overwrite: bool,
     },
@@ -142,7 +147,7 @@ enum Commands {
     #[structopt(name = "pull")]
     /// Pull in all tracked files from the remote.
     Pull {
-        // Overwrite local files?
+        // Overwrite local files if they exit.
         #[structopt(long)]
         overwrite: bool,
 
@@ -150,7 +155,17 @@ enum Commands {
         //directories: Vec<PathBuf>,
     },
 
-
+     #[structopt(name = "metadata")]
+    /// Update the project metadata.
+    Metadata {
+        /// The project name.
+        #[structopt(long)]
+        title: Option<String>,
+        // A description of the project.
+        #[structopt(long)]
+        description: Option<String>,
+    },
+ 
 }
 
 pub fn print_errors(response: Result<()>) {
@@ -185,9 +200,9 @@ async fn run() -> Result<()> {
         Some(Commands::Init { name }) => {
             Project::init(name.clone())
         }
-        Some(Commands::Status { remotes }) => {
+        Some(Commands::Status { remotes, all }) => {
             let mut proj = Project::new()?;
-            proj.status(*remotes).await
+            proj.status(*remotes, *all).await
         }
         Some(Commands::Stats {  }) => {
             //let proj = Project::new()?;
@@ -202,10 +217,6 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.link(dir, service, key, name, link_only).await
         }
-        Some(Commands::Ls {}) => {
-            let mut proj = Project::new()?;
-            proj.ls().await
-        },
         Some(Commands::Track { filename }) => {
             let mut proj = Project::new()?;
             proj.track(filename)
@@ -221,6 +232,10 @@ async fn run() -> Result<()> {
         Some(Commands::Pull { overwrite }) => {
             let mut proj = Project::new()?;
             proj.pull(*overwrite).await
+        },
+        Some(Commands::Metadata { title, description }) => {
+            let mut proj = Project::new()?;
+            proj.set_metadata(title, description)
         },
         None => {
             println!("{}\n", INFO);
