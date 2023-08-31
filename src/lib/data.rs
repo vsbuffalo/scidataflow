@@ -8,19 +8,16 @@ use crate::lib::data::serde::{Serializer,Deserializer};
 use log::{info, trace, debug};
 use chrono::prelude::*;
 use std::collections::{HashMap,BTreeMap};
-use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::future::join_all;
 use std::fs;
-use trauma::downloader::{DownloaderBuilder,StyleOptions,ProgressBarOpts};
-use std::time::Duration;
-use std::thread;
-use indicatif::{ProgressBar, ProgressStyle};
 use colored::*;
 
 use crate::{print_warn,print_info};
 use crate::lib::utils::{format_mod_time,compute_md5, md5_status,pluralize};
 use crate::lib::remote::{authenticate_remote,Remote,RemoteFile,RemoteStatusCode};
+use crate::lib::progress::Progress;
 
 // The status of a local data file, *conditioned* on it being in the manifest.
 #[derive(Debug,PartialEq,Clone)]
@@ -682,12 +679,8 @@ impl DataCollection {
         self.authenticate_remotes()?;
 
         let mut all_remote_files = HashMap::new();
-        let pb = ProgressBar::new(self.remotes.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
-                     .progress_chars("=> ")
-                     .template("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}")?
-                    );
-        pb.set_message("Fetching remote files...");
+        let pb = Progress::new(self.remotes.len() as u64)?;
+        pb.bar.set_message("Fetching remote files...");
 
         // Convert remotes into Futures, so that they can be awaited in parallel
         let fetch_futures: Vec<_> = self.remotes.iter().map(|(path, remote)| {
@@ -704,15 +697,15 @@ impl DataCollection {
         for result in results {
             match result {
                 Ok((key, value)) => {
-                    pb.set_message(format!("Fetching remote files...   {} done.", key.0));
+                    pb.bar.set_message(format!("Fetching remote files...   {} done.", key.0));
                     all_remote_files.insert(key, value);
-                    pb.inc(1);
+                    pb.bar.inc(1);
                 },
                 Err(e) => return Err(e), // Handle errors as needed
             }
         }
 
-        pb.finish_with_message("Fetching completed.");
+        pb.bar.finish_with_message("Fetching completed.");
         Ok(all_remote_files)
     }
     // Merge all local and remote files.
@@ -794,33 +787,21 @@ impl DataCollection {
 
         let mut statuses = BTreeMap::new();
 
-        let pb = ProgressBar::new(statuses_futures.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
-                     .progress_chars("=> ")
-                     .template("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}")?
-                    );
+        let pb = Progress::new(statuses.len() as u64)?;
 
-
-        let pb_clone = pb.clone();
-        thread::spawn(move || {
-            loop {
-                pb_clone.tick();
-                thread::sleep(Duration::from_millis(20));
-            }
-        });
         // process the futures as they become ready
-        pb.set_message("Calculating MD5s...");
+        pb.bar.set_message("Calculating MD5s...");
         while let Some(result) = statuses_futures.next().await {
             if let Ok((key, value)) = result {
-                pb.set_message(format!("Calculating MD5s... {} done.", &value.name));
+                pb.bar.set_message(format!("Calculating MD5s... {} done.", &value.name));
                 statuses.entry(key).or_insert_with(Vec::new).push(value);
-                pb.inc(1);
+                pb.bar.inc(1);
             } else {
                 result?;
             }
         }
 
-        pb.finish_with_message("Complete.");
+        pb.bar.finish_with_message("Complete.");
         Ok(statuses)
     }
 
@@ -1004,37 +985,13 @@ impl DataCollection {
 
                 if do_download { 
                     if let Some(remote) = self.remotes.get(dir) {
-                        let info = remote.get_download_info(merged_file, path_context, overwrite)?;
-                        let download = info.trauma_download()?;
+                        let download = remote.get_download_info(merged_file, path_context, overwrite)?;
                         downloads.push(download);
                     }
                 }
             }
         }
 
-        let style = ProgressBarOpts::new(
-            Some("{spinner:.green} [{bar:40.green/white}] {pos:>}/{len} ({percent}%) eta {eta_precise:.green} {msg}".to_string()),
-            Some("=> ".to_string()),
-            true, true);
-
-        let style_clone = style.clone();
-        let style_opts = StyleOptions::new(style, style_clone);
-
-        let total_files = downloads.len();
-        if !downloads.is_empty() { 
-            let downloader = DownloaderBuilder::new()
-                .style_options(style_opts)
-                .build();
-            downloader.download(&downloads).await;
-            println!("Downloaded {}.", pluralize(total_files as u64, "file"));
-            for download in downloads {
-                let filename = PathBuf::from(&download.filename);
-                let name_str = filename.file_name().ok_or(anyhow!("Internal Error: could not extract filename from download"))?;
-                println!(" - {}", name_str.to_string_lossy());
-            }
-        } else {
-            println!("No files downloaded.");
-        }
 
         let num_skipped = overwrite_skipped.len() + current_skipped.len() +
             messy_skipped.len();
@@ -1089,7 +1046,7 @@ mod tests {
         let nonexistent_path = "some/nonexistent/path".to_string();
         let path_context = Path::new("");
 
-        let result = DataFile::new(nonexistent_path, &path_context);
+        let result = DataFile::new(nonexistent_path, None, &path_context);
         match result {
             Ok(_) => assert!(false, "Expected an error, but got Ok"),
             Err(err) => {
@@ -1109,7 +1066,7 @@ mod tests {
 
         // Make a DataFile
         let path = file.path().to_string_lossy().to_string();
-        let data_file = DataFile::new(path, &path_context).unwrap();
+        let data_file = DataFile::new(path, None, &path_context).unwrap();
 
         // Compare MD5s
         let expected_md5 = "d3feb335769173b2db573413b0f6abf4".to_string();
@@ -1128,7 +1085,7 @@ mod tests {
 
         // Make a DataFile
         let path = file.path().to_string_lossy().to_string();
-        let data_file = DataFile::new(path, &path_context).unwrap();
+        let data_file = DataFile::new(path, None, &path_context).unwrap();
 
         // Let's also check size
         assert!(data_file.size == 11, "Size mismatch {:?} != {:?}!",
@@ -1147,7 +1104,7 @@ mod tests {
 
         // Make a DataFile
         let path = file.path().to_string_lossy().to_string();
-        let mut data_file = DataFile::new(path, &path_context).unwrap();
+        let mut data_file = DataFile::new(path, None, &path_context).unwrap();
 
         // Now, we change the data.
         writeln!(file, "Modified mock data.").unwrap();
@@ -1176,7 +1133,7 @@ mod tests {
 
         // Make a DataFile
         let path = file.path().to_string_lossy().to_string();
-        let mut data_file = DataFile::new(path, &path_context).unwrap();
+        let mut data_file = DataFile::new(path, None, &path_context).unwrap();
 
         // Now, we change the data.
         writeln!(file, "Modified mock data.").unwrap();

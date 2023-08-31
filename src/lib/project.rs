@@ -8,7 +8,10 @@ use std::io::{Read, Write};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use dirs;
+use trauma::download::Download;
+use reqwest::Url;
 
+use crate::lib::download::Downloads;
 #[allow(unused_imports)]
 use crate::{print_warn,print_info};
 use crate::lib::data::{DataFile,DataCollection};
@@ -382,9 +385,13 @@ impl Project {
         Ok(())
     }
 
-    pub async fn get(&mut self, url: &str, filename: &str) -> Result<()> {
-        let data_file = DataFile::new(filename.to_string(), Some(url), &self.path_context())?;
-        info!("Adding file '{}'.", filename);
+    pub async fn get(&mut self, url: &str, filename: Option<&str>, path: Option<&str>) -> Result<()> {
+        let mut downloads = Downloads::new();
+        let download = downloads.add(url.to_string(), filename)?;
+        
+        let file_path = &download.filename;
+        let data_file = DataFile::new(file_path.clone(), Some(url), &self.path_context())?;
+        info!("Adding file '{}'.", &file_path);
         self.data.register(data_file)?;
         Ok(())
     }

@@ -1,4 +1,5 @@
 use serde_yaml;
+use trauma::download::Download;
 use std::fs;
 use std::fs::File;
 use std::path::Path;
@@ -8,7 +9,6 @@ use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::collections::HashMap;
-use trauma::download::Download;
 use serde_derive::{Serialize,Deserialize};
 use reqwest::Url;
 
@@ -17,21 +17,10 @@ use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::dryad::DataDryadAPI;
 use crate::lib::api::zenodo::ZenodoAPI;
 use crate::lib::project::LocalMetadata;
+use crate::lib::download::{Downloads};
 
 
 const AUTHKEYS: &str = ".scidataflow_authkeys.yml";
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DownloadInfo {
-    pub url: String,
-    pub path: String,
-} 
-
-impl DownloadInfo {
-    pub fn trauma_download(&self) -> Result<Download> {
-        Ok(Download::new(&Url::parse(&self.url)?, &self.path))
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RemoteFile {
@@ -204,7 +193,7 @@ impl Remote {
     // Get Download info: the URL (with token) and destination
     // TODO: could be struct, if some APIs require more authentication
     // Note: requires each API actually *check* overwrite.
-    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<DownloadInfo> {
+    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<Download> {
         // if local DataFile is none, not in manifest; 
         // do not download
         let data_file = match &merged_file.local {
@@ -228,7 +217,9 @@ impl Remote {
             Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }?;
         let save_path = &data_file.full_path(path_context)?;
-        Ok( DownloadInfo { url: authenticated_url, path:save_path.to_string_lossy().to_string() })
+        let url = Url::parse(&authenticated_url)?;
+        let filename = save_path.to_string_lossy().to_string();
+        Ok( Download { url, filename })
     }
 }
 

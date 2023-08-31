@@ -61,64 +61,64 @@ pub fn compute_md5(file_path: &Path) -> Result<Option<String>> {
 
         md5.consume(&buffer[..bytes_read]);
     }
-    
+
     let result = md5.compute();
     Ok(Some(format!("{:x}", result)))
 }
 /*
-pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
-    let indent = indent.unwrap_or(0);
-    let nspaces = nspaces.unwrap_or(6);
+   pub fn print_fixed_width(rows: HashMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, indent: Option<usize>, color: bool) {
+   let indent = indent.unwrap_or(0);
+   let nspaces = nspaces.unwrap_or(6);
 
-    let max_cols = rows.values()
-        .flat_map(|v| v.iter())
-        .filter_map(|entry| {
-            match &entry.cols {
-                None => None,
-                Some(cols) => Some(cols.len())
-            }
-        })
-        .max()
-        .unwrap_or(0);
+   let max_cols = rows.values()
+   .flat_map(|v| v.iter())
+   .filter_map(|entry| {
+   match &entry.cols {
+   None => None,
+   Some(cols) => Some(cols.len())
+   }
+   })
+   .max()
+   .unwrap_or(0);
 
-    let mut max_lengths = vec![0; max_cols];
+   let mut max_lengths = vec![0; max_cols];
 
-    // compute max lengths across all rows
-    for entry in rows.values().flat_map(|v| v.iter()) {
-        if let Some(cols) = &entry.cols {
-            for (i, col) in cols.iter().enumerate() {
-                max_lengths[i] = max_lengths[i].max(col.width());
-            }
-        }
-    }
-    // print status table
-    let mut keys: Vec<&String> = rows.keys().collect();
-    keys.sort();
-    for (key, value) in &rows {
-        let pretty_key = if color { key.bold().to_string() } else { key.clone() };
-        println!("[{}]", pretty_key);
-
-        // Print the rows with the correct widths
-        for row in value {
-            let mut fixed_row = Vec::new();
-            let tracked = &row.tracked;
-            let local_status = &row.local_status;
-            let remote_status = &row.remote_status;
-            if let Some(cols) = &row.cols {
-                for (i, col) in cols.iter().enumerate() {
-                // push a fixed-width column to vector
-                    let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
-                    fixed_row.push(fixed_col);
-                }
-            }
-            let spacer = " ".repeat(nspaces);
-            let status_line = fixed_row.join(&spacer);
-            println!("{}{}", " ".repeat(indent), status_line);
-        }
-        println!();
-    }
+// compute max lengths across all rows
+for entry in rows.values().flat_map(|v| v.iter()) {
+if let Some(cols) = &entry.cols {
+for (i, col) in cols.iter().enumerate() {
+max_lengths[i] = max_lengths[i].max(col.width());
 }
- */
+}
+}
+// print status table
+let mut keys: Vec<&String> = rows.keys().collect();
+keys.sort();
+for (key, value) in &rows {
+let pretty_key = if color { key.bold().to_string() } else { key.clone() };
+println!("[{}]", pretty_key);
+
+// Print the rows with the correct widths
+for row in value {
+let mut fixed_row = Vec::new();
+let tracked = &row.tracked;
+let local_status = &row.local_status;
+let remote_status = &row.remote_status;
+if let Some(cols) = &row.cols {
+for (i, col) in cols.iter().enumerate() {
+// push a fixed-width column to vector
+let fixed_col = format!("{:width$}", col, width = max_lengths[i]);
+fixed_row.push(fixed_col);
+}
+}
+let spacer = " ".repeat(nspaces);
+let status_line = fixed_row.join(&spacer);
+println!("{}{}", " ".repeat(indent), status_line);
+}
+println!();
+}
+}
+*/
 // More specialized version of print_fixed_width() for statuses.
 // Handles coloring, manual annotation, etc 
 pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, 

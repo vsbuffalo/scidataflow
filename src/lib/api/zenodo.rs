@@ -692,6 +692,7 @@ mod tests {
             tracked: true,
             md5: md5.to_string(),
             size,
+            url: None
         };
 
         let path_context = Path::new("path/to/datafile");

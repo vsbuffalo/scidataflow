@@ -6,6 +6,8 @@ pub mod lib {
         pub mod zenodo;
     }
     pub mod project;
+    pub mod download;
+    pub mod progress;
     pub mod macros;
     pub mod remote;
     pub mod utils;
