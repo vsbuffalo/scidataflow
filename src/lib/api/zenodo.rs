@@ -1,5 +1,5 @@
 use anyhow::{anyhow,Result,Context};
-use std::{path::Path, fmt::Binary};
+use std::path::Path;
 use reqwest::{Method, header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_LENGTH}};
 use reqwest::{Client, Response, Body};
 use std::collections::HashMap;
@@ -9,7 +9,6 @@ use log::{info, trace, debug};
 use colored::Colorize;
 use std::convert::TryInto;
 use tokio_util::io::ReaderStream;
-use futures::StreamExt;
 
 #[allow(unused_imports)]
 use crate::{print_info,print_warn};
@@ -407,11 +406,12 @@ impl ZenodoAPI {
         let remote_md5 = info.checksum.strip_prefix("md5:").expect(&err_msg).to_owned();
         let local_md5 = data_file.md5.clone();
 
-        let msg = format!("After upload, the local ({}) and remote ({}) MD5s differed. SciDataFlow \
-                          automatically deletes the remote file in this case. \n", 
+        let msg = format!("After upload, the local ({}) and remote ({}) MD5s differed.\n\
+                          SciDataFlow automatically deletes the remote file in this case. \n", 
                           shorten(&local_md5, Some(8)), shorten(&remote_md5, Some(8)));
  
         // (10) Handle MD5 mismatch, deleting the remote file if they don't agree.
+        // NOTE: this is not tested -- see note at test_upload()
         if remote_md5 != local_md5 {
             let zenodo_file = self.file_exists(&info.key).await?;
             match zenodo_file {
@@ -426,10 +426,9 @@ impl ZenodoAPI {
                 },
                 Some(file) => {
                     self.delete_article_file(&file).await
-                        .context(format!("{}. However, scidataflow encountered an error while \
+                        .context(format!("{}. However, SciDataFlow encountered an error while \
                                          trying to delete the file.", msg))?;
-                    Err(anyhow!("{}Please try re-uploading. If this problem persists, please report it \n\
-                                to Zenodo and file an issue at: {}", msg, ISSUE_URL))
+                    Ok(false)
                 }
             }
         } else {
@@ -654,8 +653,11 @@ mod tests {
     }
 
 
-    fn setup_upload_file_mock<'a>(server: &'a MockServer, bucket_endpoint: &'a str, md5: &'a str, size: usize) -> httpmock::Mock<'a> {
+    fn setup_upload_file_mock<'a>(server: &'a MockServer, bucket_endpoint: &'a str, 
+                                  md5: &'a str, size: usize) -> httpmock::Mock<'a> {
         debug!("Setting up upload_file mock");
+        //let md5 = if !wrong_md5 { md5.to_owned() } else { md5.clone().chars().rev().collect::<String>() };
+        let remote_md5 = format!("md5:{}", md5);
         server.mock(|when, then| {
             when.method("PUT")
                 .header("Content-Type", "application/octet-stream")
@@ -664,7 +666,7 @@ mod tests {
                 .json_body(json!({
                     "key": "example_data_file.tsv",
                     "mimetype": "application/zip",
-                    "checksum": format!("md5:{}", md5),
+                    "checksum": remote_md5,
                     "version_id": "38a724d3-40f1-4b27-b236-ed2e43200f85",
                     "size": size,
                     "created": "2020-02-26T14:20:53.805734+00:00",
@@ -692,10 +694,17 @@ mod tests {
         })
     }
 
+
+    // Main Test Function
+    //
+    // Note: this does *not* test wrong MD5s. It should, but this will require refactoring
+    // things quite a bit. The issue is that the vector remote_files will need to change 
+    // mid-call to ZenodoAPI::upload(), since the file was uploaded but has wrong MD5, 
+    // and the upload() method then retrieves it
     async fn test_upload(file_exists: bool, overwrite: bool) -> Result<bool> {
         setup();
         // Start a mock server
-        let mut server = MockServer::start();
+        let server = MockServer::start();
 
         // Use the tempfile crate to create a temporary file
         let mut temp_file = tempfile::NamedTempFile::new().unwrap();
@@ -757,8 +766,11 @@ mod tests {
         // Main call to test
         let result = api.upload(&data_file, &path_context, overwrite).await;
 
+        //println!("get_files_mock={:}?, upload_file_mock={:?}, delete_file_mock={:?}", 
+        //         get_files_mock.hits(), upload_file_mock.hits(), delete_file_mock.unwrap().hits());
+
         // Ensure the specified mocks were called exactly one time (or fail).
-        get_files_mock.assert();
+        get_files_mock.assert_hits(1);
 
         // Upload mock, with and without overwrite.
         if !file_exists {
@@ -773,7 +785,7 @@ mod tests {
     #[tokio::test]
     async fn test_upload_no_overwrite_no_remote_files() -> Result<()> {
         let result = test_upload(false, false).await?;
-        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
+        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}0. Result: {:?}", 
                 false, false, result);
         Ok(())
     }
@@ -781,6 +793,7 @@ mod tests {
     #[tokio::test]
     async fn test_upload_no_overwrite_with_remote_files() -> Result<()> {
         let result = test_upload(true, false).await?;
+        // result should return false since no upload was done.
         assert!(!result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
                 true, false, result);
         Ok(())

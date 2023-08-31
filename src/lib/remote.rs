@@ -1,5 +1,5 @@
 use serde_yaml;
-use std::{fs, path};
+use std::fs;
 use std::fs::File;
 use std::path::Path;
 use std::io::Read;

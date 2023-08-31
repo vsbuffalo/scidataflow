@@ -27,8 +27,6 @@ use crate::lib::data::{DataFile, MergedFile};
 use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
 use crate::lib::project::LocalMetadata;
 
-use super::zenodo::ZenodoDeposition;
-
 pub const FIGSHARE_BASE_URL: &str = "https://api.figshare.com/v2/";
 
 // for testing:
