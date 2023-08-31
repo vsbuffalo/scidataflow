@@ -6,7 +6,7 @@
 
 use url::Url;
 use std::fs;
-use std::path::{Path,PathBuf};
+use std::path::Path;
 use std::io::{Read,Seek,SeekFrom};
 use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
@@ -23,8 +23,8 @@ use tokio::io::AsyncWriteExt;
 
 #[allow(unused_imports)]
 use crate::{print_info,print_warn};
-use crate::lib::data::{DataFile, MergedFile};
-use crate::lib::remote::{AuthKeys, RemoteFile, DownloadInfo,RequestData};
+use crate::lib::data::DataFile;
+use crate::lib::remote::{AuthKeys, RemoteFile, RequestData};
 use crate::lib::project::LocalMetadata;
 
 pub const FIGSHARE_BASE_URL: &str = "https://api.figshare.com/v2/";
@@ -324,6 +324,8 @@ impl FigShareAPI {
 
 
     // Download a single file through the FigShare API
+    // NOTE: Mostly deprecated due to trauma-based downloads.
+    #[allow(dead_code)]
     async fn download_file(&self, url: &str, save_path: &Path) -> Result<()> {
         let response = reqwest::get(url).await?;
         let mut file = File::create(save_path).await?;
@@ -368,48 +370,8 @@ impl FigShareAPI {
         Ok(true)
     }
 
-    // Get the RemoteFile.url and combine with the token to get
-    // a private download link.
-    //
-    // Note: this is overwrite-safe: it will error out 
-    // if file exists unless overwrite is true.
-    //
-    // Note: this cannot be moved to higher-level (e.g. Remote)
-    // since each API implements authentication its own way. 
-    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) 
-        -> Result<DownloadInfo> {
-            // if local DataFile is none, not in manifest; 
-            // do not download
-            let data_file = match &merged_file.local {
-                None => return Err(anyhow!("Cannot download() without local DataFile.")),
-                Some(file) => file
-            };
-            // check to make sure we won't overwrite
-            if data_file.is_alive(path_context) && !overwrite {
-                return Err(anyhow!("Data file '{}' exists locally, and would be \
-                                   overwritten by download. Use --overwrite to download.",
-                                   data_file.path));
-            }
-            // if no remote, there is nothing to download,
-            // silently return Ok. Get URL.
-            let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
-            let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
-
-            // add the token in
-            let url = format!("{}?token={}", url, self.token);
-            let save_path = &data_file.full_path(path_context)?;
-            Ok( DownloadInfo { url, path:save_path.to_string_lossy().to_string() })
-        }
-
-    // Download a single file.
-    //
-    // For the most part, this is deprecated, since we use the download manager 
-    // "trauma" now.
-    pub async fn download(&self, merged_file: &MergedFile, 
-                          path_context: &Path, overwrite: bool) -> Result<()>{
-        let info = self.get_download_info(merged_file, path_context, overwrite)?;
-        self.download_file(&info.url, &PathBuf::from(info.path)).await?;
-        Ok(())
+    pub fn authenticate_url(&self, url: &str) -> Result<String> {
+        Ok(format!("{}?token={}", url, self.token))
     }
 
     pub async fn find_article(&self) -> Result<Option<FigShareArticle>> {

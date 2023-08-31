@@ -1023,6 +1023,11 @@ impl DataCollection {
                 .build();
             downloader.download(&downloads).await;
             println!("Downloaded {}.", pluralize(total_files as u64, "file"));
+            for download in downloads {
+                let filename = PathBuf::from(&download.filename);
+                let name_str = filename.file_name().ok_or(anyhow!("Internal Error: could not extract filename from download"))?;
+                println!(" - {}", name_str.to_string_lossy());
+            }
         } else {
             println!("No files downloaded.");
         }

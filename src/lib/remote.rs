@@ -8,7 +8,7 @@ use anyhow::{anyhow,Result};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use std::collections::HashMap;
-use trauma::{download::Download};
+use trauma::download::Download;
 use serde_derive::{Serialize,Deserialize};
 use reqwest::Url;
 
@@ -205,11 +205,30 @@ impl Remote {
     // TODO: could be struct, if some APIs require more authentication
     // Note: requires each API actually *check* overwrite.
     pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<DownloadInfo> {
-        match self {
-            Remote::FigShareAPI(fgsh_api) => fgsh_api.get_download_info(merged_file, path_context, overwrite),
-            Remote::ZenodoAPI(_) => Err(anyhow!("ZenodoAPI does not support get_project method")),
-            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
+        // if local DataFile is none, not in manifest; 
+        // do not download
+        let data_file = match &merged_file.local {
+            None => return Err(anyhow!("Cannot download() without local DataFile.")),
+            Some(file) => file
+        };
+        // check to make sure we won't overwrite
+        if data_file.is_alive(path_context) && !overwrite {
+            return Err(anyhow!("Data file '{}' exists locally, and would be \
+                               overwritten by download. Use --overwrite to download.",
+                               data_file.path));
         }
+        // if no remote, there is nothing to download,
+        // silently return Ok. Get URL.
+        let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
+        let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
+
+        let authenticated_url = match self {
+            Remote::FigShareAPI(fgsh_api) => fgsh_api.authenticate_url(url),
+            Remote::ZenodoAPI(znd_api) => znd_api.authenticate_url(url),
+            Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
+        }?;
+        let save_path = &data_file.full_path(path_context)?;
+        Ok( DownloadInfo { url: authenticated_url, path:save_path.to_string_lossy().to_string() })
     }
 }
 
