@@ -208,7 +208,9 @@ struct FileCounts {
     local: u64,
     remote: u64,
     both: u64,
-    total: u64
+    total: u64,
+    #[allow(dead_code)]
+    messy: u64
 }
 
 fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
@@ -216,36 +218,57 @@ fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
     let mut remote = 0;
     let mut both = 0;
     let mut total = 0;
+    let mut messy = 0;
     for files in rows.values() {
         for file in files {
             total += 1;
-            match (&file.local_status, &file.remote_status) {
-                (None, None) => {
+           match (&file.local_status, &file.remote_status, &file.tracked) {
+                (None, None, _) => {
                     return Err(anyhow!("Internal Error: get_counts found a file with both local/remote set to None."));
                 },
-                (Some(_), None) => {
-                    local += 1;
-                }, 
-                (None, Some(_)) => {
+                (None, Some(_), None) => {
                     remote += 1;
                 },
-                (Some(_), Some(_)) => {
+                (Some(_), None, Some(false)) => {
+                    local += 1;
+                }, 
+                (Some(_), None, None) => {
+                    local += 1;
+                }, 
+                (None, Some(_), Some(true)) => {
+                    remote += 1;
+                },
+                (None, Some(_), Some(false)) => {
+                    local += 1;
+                },
+                (Some(_), Some(_), Some(true)) => {
                     both += 1;
+                },
+                (Some(_), Some(_), Some(false)) => {
+                    messy += 1;
+                },
+                (Some(_), None, Some(true)) => {
+                    remote += 1;
+                },
+                (Some(_), Some(_), None) => {
+                    messy += 1;
                 }
             }
         }
     }
-    Ok(FileCounts { local, remote, both, total })
+    Ok(FileCounts { local, remote, both, total, messy })
 }
 
 pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>,
                     all: bool) {
+    println!("--> {:?}", rows);
     println!("{}", "Project data status:".bold());
     let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
-    println!("{} on local and remotes ({} only local, {} only remote), {} total.\n", 
+    println!("{} local and tracked by a remote ({} only local, {} only remote), {} total.\n", 
              pluralize(counts.both as u64, "file"),
              pluralize(counts.local as u64, "file"),
              pluralize(counts.remote as u64, "file"),
+             //pluralize(counts.messy as u64, "file"),
              pluralize(counts.total as u64, "file"));
 
     // this brings the remote name (if there is a corresponding remote) into 

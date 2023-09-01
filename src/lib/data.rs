@@ -904,7 +904,8 @@ impl DataCollection {
         println!("Uploaded {}.", pluralize(num_uploaded as u64, "file"));
         let num_skipped = overwrite_skipped.len() + current_skipped.len() +
             messy_skipped.len() + untracked_skipped.len();
-        println!("Skipped {} files:", num_skipped);
+        let punc = if num_skipped > 0 { "." } else { ":" };
+        println!("Skipped {}{}", pluralize(num_skipped as u64, "file"), punc);
         if !untracked_skipped.is_empty() {
             println!("  Untracked: {}", pluralize(untracked_skipped.len() as u64, "file"));
             for path in untracked_skipped {

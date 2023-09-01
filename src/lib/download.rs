@@ -84,7 +84,8 @@ impl Downloads {
                 .build();
             downloader.download(&downloads).await;
             if show_total {
-                println!("Downloaded {}.", pluralize(total_files as u64, "file"));
+                let punc = if total_files > 0 { "." } else { ":" };
+                println!("Downloaded {}{}", pluralize(total_files as u64, "file"), punc);
             }
             for download in downloads {
                 if let Some(msg) = success_status {

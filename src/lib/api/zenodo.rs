@@ -265,13 +265,19 @@ impl ZenodoAPI {
 
     pub async fn find_deposition(&self) -> Result<Option<ZenodoDeposition>> {
         let depositions = self.get_depositions().await?;
-        let matches_found: Vec<_> = depositions.into_iter().filter(|a| a.title == self.name).collect();
+        let mut matches_found: Vec<_> = depositions.into_iter().filter(|a| a.title == self.name).collect();
         if !matches_found.is_empty() {
             if matches_found.len() > 1 {
                 return Err(anyhow!("Found multiple Zenodo Depositions with the \
                                    title '{}'", self.name));
             } else {
-                return Ok(Some(matches_found[0].clone()));
+                // We need to do one more API call, to get the full listing
+                // with the bucket URL.
+                let partial_deposition = matches_found.remove(0);
+                let url = format!("deposit/depositions/{}", partial_deposition.id);
+                let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None, None).await?;
+                let deposition: ZenodoDeposition = response.json().await?;
+                return Ok(Some(deposition));
             }
         } else {
             return Ok(None);
@@ -317,7 +323,11 @@ impl ZenodoAPI {
         };
 
         self.deposition_id = Some(info.id as u64);
-        self.bucket_url = info.links.bucket;
+        let bucket_url = info.links.bucket;
+        if bucket_url.is_none() {
+            return Err(anyhow!("Internal Error: ZenodoAPI::find_deposition() did not return an entry with a bucket_url."));
+        }
+        self.bucket_url = bucket_url;
 
         Ok(())
     }
