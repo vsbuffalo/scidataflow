@@ -7,9 +7,8 @@ use std::path::{Path,PathBuf};
 use std::io::{Read, Write};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
+use csv::{ReaderBuilder, StringRecord};
 use dirs;
-use trauma::download::Download;
-use reqwest::Url;
 
 use crate::lib::download::Downloads;
 #[allow(unused_imports)]
@@ -278,9 +277,10 @@ impl Project {
         Ok(())
     }
 
-    pub fn is_clean(&self) -> Result<bool> {
+    // TODO
+    pub async fn is_clean(&self) -> Result<bool> {
         for data_file in self.data.files.values() {
-            let status = data_file.status(&self.path_context())?;
+            let status = data_file.status(&self.path_context()).await?;
             if status != LocalStatusCode::Current {
                 return Ok(false);
             }
@@ -308,11 +308,11 @@ impl Project {
     } */
 
 
-    pub fn add(&mut self, files: &Vec<String>) -> Result<()> {
+    pub async fn add(&mut self, files: &Vec<String>) -> Result<()> {
         let mut num_added = 0;
         for filepath in files {
             let filename = self.relative_path_string(Path::new(&filepath.clone()))?;
-            let data_file = DataFile::new(filename.clone(), None, &self.path_context())?;
+            let data_file = DataFile::new(filename.clone(), None, &self.path_context()).await?;
             info!("Adding file '{}'.", filename);
             self.data.register(data_file)?;
             num_added += 1;
@@ -321,9 +321,9 @@ impl Project {
         self.save()
     }
 
-    pub fn update(&mut self, filepath: Option<&String>) -> Result<()> {
+    pub async fn update(&mut self, filepath: Option<&String>) -> Result<()> {
         let path_context = self.path_context();
-        self.data.update(filepath, &path_context)?;
+        self.data.update(filepath, &path_context).await?;
         self.save()
     }
 
@@ -385,19 +385,90 @@ impl Project {
         Ok(())
     }
 
-    pub async fn get(&mut self, url: &str, filename: Option<&str>, path: Option<&str>) -> Result<()> {
+    pub async fn get(&mut self, url: &str, filename: Option<&str>, 
+                     overwrite: bool) -> Result<()> {
         let mut downloads = Downloads::new();
-        let download = downloads.add(url.to_string(), filename)?;
-        
-        let file_path = &download.filename;
-        let data_file = DataFile::new(file_path.clone(), Some(url), &self.path_context())?;
-        info!("Adding file '{}'.", &file_path);
-        self.data.register(data_file)?;
-        Ok(())
+        let download = downloads.add(url.to_string(), filename, overwrite)?;
+        if let Some(dl) = download {
+            let filepath = dl.filename.clone();
+
+            // get the file
+            downloads.retrieve(None, None).await?;
+
+            // convert to relative path (based on where we are)
+            let filepath = self.relative_path_string(Path::new(&filepath))?;
+
+            let data_file = DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
+
+            // Note: we do not use Project::add() since this works off strings.
+            // and we need to pass the URL, etc.
+            self.data.register(data_file)?;
+            self.save()?;
+            Ok(())
+        } else {
+            Err(anyhow!("The file at '{}' was not downloaded because it would overwrite a file.\n\
+                        Use 'sdf get <URL> --ovewrite' to overwrite it.", url))
+        }
     }
 
-    pub async fn get_from_file(&mut self, filename: &str, column: u64) -> Result<()> {
-        // TODO
+    pub async fn bulk(&mut self, filename: &str, column: Option<u64>, 
+                      header: bool, overwrite: bool) -> Result<()> {
+        let extension = std::path::Path::new(filename)
+            .extension()
+            .and_then(std::ffi::OsStr::to_str);
+
+        let delimiter = match extension {
+            Some("csv") => b',',
+            Some("tsv") => b'\t',
+            _ => return Err(anyhow!("Unsupported file type: {:?}", extension)),
+        };
+
+        let file = File::open(filename)?;
+        let mut reader = ReaderBuilder::new()
+            .delimiter(delimiter)
+            .has_headers(header)
+            .from_reader(file);
+
+        let column = column.unwrap_or(0) as usize;
+
+        let mut downloads = Downloads::new();
+        let mut filepaths = Vec::new();
+        let mut urls = Vec::new();
+        let mut skipped = Vec::new();
+        let mut num_lines = 0;
+        for result in reader.records() {
+            let record: StringRecord = result?;
+            if let Some(url) = record.get(column) {
+                num_lines += 1;
+                let url = url.to_string();
+                let download = downloads.add(url.clone(), None, overwrite)?;
+                if let Some(dl) = download {
+                    let filepath = dl.filename.clone();
+                    filepaths.push(filepath);
+                    urls.push(url.clone());
+                } else {
+                    skipped.push(url.clone());
+                }
+            }
+        }
+
+        // grab all the files
+        downloads.retrieve(None, None).await?;
+
+        let mut num_added = 0;
+        for (filepath, url) in filepaths.iter().zip(urls.iter()) {
+            let rel_file_path = self.relative_path_string(Path::new(&filepath))?;
+            let data_file = DataFile::new(rel_file_path.clone(), Some(url), &self.path_context()).await?;
+            self.data.register(data_file)?;
+            num_added += 1;
+        }
+        let num_skipped = skipped.len();
+        println!("{} URLs found in '{}.'\n\
+                  {} files were downloaded and added.\n\
+                  {} files were skipped because they existed (and --overwrite was no specified).",
+                  num_lines, filename,
+                  num_added, num_skipped);
+        self.save()?;
         Ok(())
     }
 

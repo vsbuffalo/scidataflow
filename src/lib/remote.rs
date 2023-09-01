@@ -17,8 +17,6 @@ use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::dryad::DataDryadAPI;
 use crate::lib::api::zenodo::ZenodoAPI;
 use crate::lib::project::LocalMetadata;
-use crate::lib::download::{Downloads};
-
 
 const AUTHKEYS: &str = ".scidataflow_authkeys.yml";
 

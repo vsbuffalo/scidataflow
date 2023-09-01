@@ -16,9 +16,9 @@ mod tests {
     use std::path::PathBuf;
     use scidataflow::lib::data::LocalStatusCode;
 
-    #[test]
-    fn test_fixture() {
-        let fixture = setup(false);
+    #[tokio::test]
+    async fn test_fixture() {
+        let fixture = setup(false).await;
         // test that the fixtures were created
         //info!("files: {:?}", test_env.files);
         if let Some(fixtures) = &fixture.env.files {
@@ -28,9 +28,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_init() {
-        let fixture = setup(false);
+    #[tokio::test]
+    async fn test_init() {
+        let fixture = setup(false).await;
         // test that init() creates the data manifest
         let data_manifest = fixture.env.get_file_path("data_manifest.yml");
         info!("Checking for file at path: {}", data_manifest.display()); // Add this log
@@ -39,7 +39,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_status_current() {
-        let mut fixture = setup(false);
+        let mut fixture = setup(false).await;
         let path_context = fixture.project.path_context();
         let statuses = get_statuses(&mut fixture, &path_context).await;
 
@@ -77,7 +77,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_update_status_modified() {
-        let mut fixture = setup(true);
+        let mut fixture = setup(true).await;
         let path_context = fixture.project.path_context();
         let statuses = get_statuses_map(&mut fixture, &path_context).await;
 
@@ -100,7 +100,7 @@ mod tests {
         let re_add_files = vec![file_to_check.to_string_lossy().to_string()];
 
         for file in &re_add_files {
-            let result = fixture.project.update(Some(&file));
+            let result = fixture.project.update(Some(&file)).await;
             assert!(result.is_ok(), "re-adding raised Error!");
         }
         
@@ -113,13 +113,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_already_added_error() {
-        let mut fixture = setup(true);
+        let mut fixture = setup(true).await;
 
+        println!("DATAAAA: {:?}", fixture.project.data);
         if let Some(files) = &fixture.env.files {
             for file in files {
                 let mut file_list = Vec::new();
                 file_list.push(file.path.clone());
-                let result = fixture.project.add(&file_list);
+                let result = fixture.project.add(&file_list).await;
 
                 // check that we get 
                 match result {

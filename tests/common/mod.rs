@@ -175,7 +175,7 @@ impl Drop for TestEnvironment {
     }
 }
 
-pub fn setup(do_add: bool) -> TestFixture {
+pub async fn setup(do_add: bool) -> TestFixture {
     lazy_static! {
         static ref INIT_LOGGING: Once = Once::new();
     }
@@ -209,7 +209,7 @@ pub fn setup(do_add: bool) -> TestFixture {
             .collect();
 
         // add those files
-        let _ = project.add(&add_files);
+        let _ = project.add(&add_files).await;
     }
 
     TestFixture { env: test_env, project }

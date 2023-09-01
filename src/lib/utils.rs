@@ -41,7 +41,7 @@ pub fn ensure_exists(path: &Path) -> Result<()> {
 }
 
 /// Compute the MD5 of a file returning None if the file is empty.
-pub fn compute_md5(file_path: &Path) -> Result<Option<String>> {
+pub async fn compute_md5(file_path: &Path) -> Result<Option<String>> {
     const BUFFER_SIZE: usize = 1024;
 
     let mut file = match File::open(file_path) {

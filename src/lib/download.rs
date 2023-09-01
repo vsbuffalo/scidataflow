@@ -9,7 +9,7 @@ use crate::lib::progress::{DEFAULT_PROGRESS_STYLE, DEFAULT_PROGRESS_INC};
 use crate::lib::utils::pluralize;
 
 pub struct Downloads {
-    list: Vec<Download>,
+    pub list: Vec<Download>,
 }
 
 
@@ -36,7 +36,8 @@ impl Downloads {
         Downloads { list }
     }
 
-    pub fn add<T: Downloadable>(&mut self, item: T, filename: Option<&str>) -> Result<&Download> {
+    pub fn add<T: Downloadable>(&mut self, item: T, filename: Option<&str>,
+                                overwrite: bool) -> Result<Option<&Download>> {
         let url = item.to_url()?;
 
         let resolved_filename = match filename {
@@ -50,10 +51,14 @@ impl Downloads {
             }
         };
 
+        let file_path = PathBuf::from(&resolved_filename);
+        if file_path.exists() && !overwrite {
+            return Ok(None);
+        }
  
         let download = Download { url, filename: resolved_filename };
         self.list.push(download);
-        Ok(self.list.last().ok_or(anyhow::anyhow!("Failed to add download"))?)
+        Ok(Some(self.list.last().ok_or(anyhow::anyhow!("Failed to add download"))?))
     }
 
     pub fn default_style(&self) -> Result<StyleOptions> {
@@ -67,7 +72,7 @@ impl Downloads {
     }
 
 
-    pub async fn download_all(&self, success_status: Option<&str>, 
+    pub async fn retrieve(&self, success_status: Option<&str>, 
                               no_downloads_message: Option<&str>) -> Result<()> {
         let downloads = &self.list;
         let total_files = downloads.len();

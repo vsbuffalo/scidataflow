@@ -3,6 +3,8 @@ use anyhow::Result;
 use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
+use tokio::runtime::Builder;
+
 
 use scidataflow::lib::project::Project;
 use scidataflow::logging_setup::setup;
@@ -74,7 +76,32 @@ enum Commands {
         #[structopt(long)]
         name: Option<String>
     },
-
+    #[structopt(name = "get")]
+    /// Download a file from a URL.
+    Get {
+        /// Download filename (default: based on URL).
+        url: String,
+        #[structopt(long)]
+        name: Option<String>,
+        /// Overwrite local files if they exit.
+        #[structopt(long)]
+        overwrite: bool
+    },
+    #[structopt(name = "bulk")]
+    /// Download a bunch of files from links stored in a file.
+    Bulk {
+        /// A TSV or CSV file containing a column of URLs. Type inferred from suffix.
+        filename: String,
+        /// Which column contains links (default: first).
+        #[structopt(long)]
+        column: Option<u64>,
+        /// The TSV or CSV starts with a header (i.e. skip first line).
+        #[structopt(long)]
+        header: bool,
+        /// Overwrite local files if they exit.
+        #[structopt(long)]
+        overwrite: bool,
+    },
     #[structopt(name = "status")]
     /// Show status of data.
     Status {
@@ -139,7 +166,7 @@ enum Commands {
     #[structopt(name = "push")]
     /// Push all tracked files to remote.
     Push {
-        // Overwrite remote files if they exit.
+        /// Overwrite remote files if they exit.
         #[structopt(long)]
         overwrite: bool,
     },
@@ -147,7 +174,7 @@ enum Commands {
     #[structopt(name = "pull")]
     /// Pull in all tracked files from the remote.
     Pull {
-        // Overwrite local files if they exit.
+        /// Overwrite local files if they exit.
         #[structopt(long)]
         overwrite: bool,
 
@@ -175,16 +202,27 @@ pub fn print_errors(response: Result<()>) {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     setup();
-    match run().await {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Error: {:?}", e);
-            std::process::exit(1);
+
+    let ncores = 4;
+
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(ncores)
+        .enable_all()
+        .build()
+        .unwrap();
+
+
+    runtime.block_on(async {
+        match run().await {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
         }
-    }
+    });
 }
 
 async fn run() -> Result<()> {
@@ -192,10 +230,18 @@ async fn run() -> Result<()> {
     match &cli.command {
         Some(Commands::Add { filenames }) => {
             let mut proj = Project::new()?;
-            proj.add(filenames)
+            proj.add(filenames).await
         }
         Some(Commands::Config { name, email, affiliation }) => {
             Project::set_config(name, email, affiliation)
+        }
+        Some(Commands::Get { url, name, overwrite }) => {
+            let mut proj = Project::new()?;
+            proj.get(url, name.as_deref(), *overwrite).await
+        }
+        Some(Commands::Bulk { filename, column, header, overwrite }) => {
+            let mut proj = Project::new()?;
+            proj.bulk(filename, *column, *header, *overwrite).await
         }
         Some(Commands::Init { name }) => {
             Project::init(name.clone())
@@ -211,7 +257,7 @@ async fn run() -> Result<()> {
         }
         Some(Commands::Update { filename }) => {
             let mut proj = Project::new()?;
-            proj.update(filename.as_ref())
+            proj.update(filename.as_ref()).await
         }
         Some(Commands::Link { dir, service, key, name, link_only }) => {
             let mut proj = Project::new()?;
