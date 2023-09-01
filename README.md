@@ -200,154 +200,46 @@ $ sdf bulk human_annotation.tsv --column 1 --header
 
 ### Adding Metadata
 
-Some data repository services like Zenodo support 
+Some data repository services like Zenodo allow data depositions to be associated with a creator's metadata (e.g. full name, email, affiliation). SciDataFlow automatically propagates this from a file in `~/.scidataflow_config`. You can set your user metadata (which should be done early on, sort of like with Git) with:
 
-This indicates the 
-The larger vision of SciDataFlow is to change how data flows through scientific projects. The way scientific data is currently shared is fundamentally **broken**, and it is prevent the reuse of important **scientific assets**. By lowering the barrier to sharing and retrieving scientific data, SciDataFlow hopes to improve the *reuse* of data. For example, suppose one of your projects required 
+```bash
+$ sdf config --name "Joan B. Scientist" --email "joanbscientist@berkeley.edu" --affiliation "UC Berkeley"
+```
 
-Or perhaps you're in
-the midst of a large computational project, and need a better way to track the
-data going into a project, intermediate data, and whether data has changed
-during different runs of a pipeline.
+Projects can also have store metadata, such as a title and description. This is kept in the Data Manifest. You can set this manually with: 
 
-Perhaps you're submitting a manuscript to a journal, and you need to go through
-a large project's directory to find and upload supplementary data to a data
-repository service like [Zenodo](http://zenodo.org) or
-[FigShare](http://figshare.com). It can be labor intensive to manually find and
-upload each of these data files necessary to make a project reproducible.
+```bash
+$ sdf metadata --title "genomics_analysis" --description "A re-analysis of Joan's data."
+```
 
-Or maybe a colleague created a small but important *scientific asset*, such as
-lifting a recombination map to a new reference genome versionl
+## SciDataFlow's Vision
 
+The larger vision of SciDataFlow is to change how data flows through scientific projects. The way scientific data is currently shared is fundamentally **broken**, which prevents the reuse of data that is the output of some smaller step in the scientific process. We call these **scientific assets**. 
 
+**Scientific Assets** are the output of some computational pipeline or analysis which has the following important characteristic:  **Scientific Assets should be *reusable* by *everyone*, and be *reused* by everyone.** Being **reusable** means all other researchers should be *able* to quickly reuse a scientific asset (without having to spend hours trying to find and download data). Being **reused** by everyone means that using a scientific asset should be the *best* way to do something. 
 
-## Philosophy 
+For example, if I lift over a recombination map to a new reference genome, that pipeline and output data should be a scientific asset. It should be reusable to everyone — we should **not** each be rewriting the same bioinformatics pipelines for routine tasks. There are three problems with this: (1) each reimplementation has an independent chance of errors, (2) it's a waste of time, (3) there is no cumulative *improvement* of the output data. It's not an *asset*; the result of each implementation is a *liability*!
 
-There is a fundamental other valuable asset in modern science other than that
-paper. It is a reproducible, reusable set of project data.
+Lowering the barrier to reusing computational steps is one of SciDataFlow's main motivations. Each scientific asset should have a record of what computational steps produced output data, and with one command (`sdf pull`) it should be possible to retrieve all data outputs from that repository. If the user only wants to reuse the data, they can stop there — they have the data locally and can proceed with their research. If the user wants to investigate how the input data was generated, the code is right there too. If they want to try rerunning the computational steps that produced that analysis, they can do that too. Note that SciDataFlow is agnostic to this — by design, it does not tackle the hard problem of managing software versions, computational environments, etc. It can work alongside software (e.g. [Docker](https://www.docker.com) or [Singularity](https://docs.sylabs.io/guides/3.5/user-guide/introduction.html#)) that tries to solve that problem.
 
-SciFlow uses a fairly permissive project structure. However, it must 
-work around one key issue: most remote data stores do not supported
-nested hierarchy. Of course, one could just archive and zip a complex 
-data directory (and in some cases, that is the only option). However,
-keeping this updated is a pain, and it archive files (like `.tar.gz`)
-obscure the data files they contain, making it difficult to track
-them and their changes.
+By lowering the barrier to sharing and retrieving scientific data, SciDataFlow hopes to improve the reuse of data. 
 
-SciFlow gets around this by allowing data to be in any directory below the
-project root directory (the directory containing `data_manifest.yml`, and
-likely `.git/`). However, t
+## Future Plans
 
+In the long run, the SciDataFlow YAML specification would allow for recipe-like reuse of data. I would like to see, for example, a set of human genomics scientific assets on GitHub that are continuously updated and reused. Then, rather than a researcher beginning a project by navigating many websites for human genome annotation or data, they might do something like:
 
+```bash
+$ mkdir -p new_adna_analysis/data/annotation
+$ cd new_adna_analysis/data/annotation
+$ git clone git@github.com:human_genome_assets/decode_recmap_hg38
+$ (cd decode_recmap/ && sdf pull)
+$ git clone git@github.com:human_genome_assets/annotation_hg38
+$ (cd annotation_hg38 && sdf pull)
+```
 
-Science has several problems, and I think the most severe of which is that
-manuscripts have extremely limited value in terms of our long-term
-understanding of complex phenomenon. Science needs to build of previous work
-organically, so that lineages of work on one topic can rely on the same,
-robust shared assets.
+and so forth. Then, they may look at the `annotation_hg38/` asset, find a problem, fix it, and issue a GitHub pull request. If the change is fixed, the maintainer would then just do `sdf push --overwrite` to push the data file to the data repository. 
+Then, the Scientific Asset is then updated for everyone to use an benefit from. All other researchers can then instantly use the updated asset; all it takes is a mere `sdf pull --overwrite`.
 
-What is ProjectData? 
-
-ProjectData are sort of like supplementary material, except instead of being
-stored in a PDF that is hard to access, it is immediately accessible from
-anywhere with the commands:
-
-    git clone https://github.com/scientist_anne/research_project.git
-    cd research_project/
-    scf status
-
-    scf pull  # pull in all the project data.
-
-
-## Supported Remotes
-
- - [x] FigShare
- - [ ] Data Dryad
- - [x] Zenodo
- - [ ] static remotes (i.e. just URLs)
-
-## TODO 
-
- - remote_init for zenodo needs to check for existing.
-
- - link_only should propagate remote IDs, etc
-
- - we need to be more strict about whether the remotes have files that 
-   are listed as tracked in *subdirectories*. E.g. we should, when a 
-   link to a remote is added to track a directory, check that that
-   directory does not have files in the manifest that are are in 
-   subdirectories.
-
-## Operation
-
-Digest states:
-
- - local file system
- - local manifest
- - remote supports MD5 
- - remote does not supports MD5 
-
-1. Pulling in remote files.
-
-2. Pushing local files to a remote.
-
-3. Clobbered local data. A more complex case; local data is "messy", e.g. local
-   files and manifest disagree. 
-
-
-
-
-
-
-## Design
-
-The main `struct`s for managing the data manifest are `DataFile` (corresponding
-to one registered data file) and `DataCollection`. `DataCollection` stores a
-`HashMap` with keys that are the *relative* path to the (relative to where
-`data_manifest.yml` is) and values that are the `DataFile` object. `serde`
-manages serialization/deserialization. `DataCollection` also manages the remote
-types (e.g. FigShare, Data Dryad, etc). Each remote is stored in a `HashMap`
-with the path tracked by the remote as keys, and a `Remote` `enum` for the
-values. Each `Remote` `enum` corresponds to one of the supported remotes.
-
-The `Remote` `enum` has methods that are meant as a generic interface for *any*
-remote. Most core logic should live here. Furthermore, `DataCollection` and `DataFile`
-
-
-## Statuses
-
-Files registered in the data manifest can have multiple statuses: 
-
- - **Local status**: 
-   - **Current**: digest agrees between manifest and the local file.
-
-   - **Modified**: digest disagrees between manifest and the local file, i.e.
-     it has been modified.
-      
-   - **Deleted**: A record of this data file exists in the manifest, but the
-     file does not exist.
-
-   - **Invalid**: Invalid state.
-
- - **Remote status**: 
-
-
- - **Tracked**: whether the local data file is to be synchronized with remotes.
-
- - **Local-Remote MD5 mismatch**: 
-
-In data manifest, not tracked: upon push, will not be uploaded to remote. If
-it's on the remote, this should prompt an error.
-
-
-
-
-
-
-## TODO
-
- - wrap git, do something like `scf clone` that pulls in Git repo.
- - recursive pulling.
- - check no external file; add tests
+## Installing SciDataFlow
 
 
