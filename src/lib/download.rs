@@ -72,8 +72,10 @@ impl Downloads {
     }
 
 
-    pub async fn retrieve(&self, success_status: Option<&str>, 
-                              no_downloads_message: Option<&str>) -> Result<()> {
+    pub async fn retrieve(&self, 
+                          success_status: Option<&str>, 
+                          no_downloads_message: Option<&str>,
+                          show_total: bool) -> Result<()> {
         let downloads = &self.list;
         let total_files = downloads.len();
         if !downloads.is_empty() { 
@@ -81,7 +83,9 @@ impl Downloads {
                 .style_options(self.default_style()?)
                 .build();
             downloader.download(&downloads).await;
-            println!("Downloaded {}.", pluralize(total_files as u64, "file"));
+            if show_total {
+                println!("Downloaded {}.", pluralize(total_files as u64, "file"));
+            }
             for download in downloads {
                 if let Some(msg) = success_status {
                     let filename = PathBuf::from(&download.filename);

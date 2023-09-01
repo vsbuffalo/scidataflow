@@ -393,17 +393,22 @@ impl Project {
             let filepath = dl.filename.clone();
 
             // get the file
-            downloads.retrieve(None, None).await?;
+            downloads.retrieve(Some("Downloaded '{}'."), None, false).await?;
 
             // convert to relative path (based on where we are)
             let filepath = self.relative_path_string(Path::new(&filepath))?;
 
-            let data_file = DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
+            if !self.data.contains(&filepath).await? {
+                let data_file = DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
 
-            // Note: we do not use Project::add() since this works off strings.
-            // and we need to pass the URL, etc.
-            self.data.register(data_file)?;
-            self.save()?;
+                // Note: we do not use Project::add() since this works off strings.
+                // and we need to pass the URL, etc.
+                self.data.register(data_file)?;
+                self.save()?;
+            } else {
+                println!("File '{}' already existed in \
+                         the manifest, so it was not added.", &filepath);
+            }
             Ok(())
         } else {
             Err(anyhow!("The file at '{}' was not downloaded because it would overwrite a file.\n\
@@ -453,21 +458,27 @@ impl Project {
         }
 
         // grab all the files
-        downloads.retrieve(None, None).await?;
+        downloads.retrieve(None, None, false).await?;
 
         let mut num_added = 0;
+        let mut num_already_registered = 0;
         for (filepath, url) in filepaths.iter().zip(urls.iter()) {
             let rel_file_path = self.relative_path_string(Path::new(&filepath))?;
-            let data_file = DataFile::new(rel_file_path.clone(), Some(url), &self.path_context()).await?;
-            self.data.register(data_file)?;
-            num_added += 1;
+            if !self.data.contains(&rel_file_path).await? {
+                let data_file = DataFile::new(rel_file_path.clone(), Some(url), &self.path_context()).await?;
+                self.data.register(data_file)?;
+                num_added += 1;
+            } else {
+                num_already_registered += 1;
+            }
         }
         let num_skipped = skipped.len();
         println!("{} URLs found in '{}.'\n\
-                  {} files were downloaded and added.\n\
+                  {} files were downloaded, {} added to manifest ({} were already registered).\n\
                   {} files were skipped because they existed (and --overwrite was no specified).",
                   num_lines, filename,
-                  num_added, num_skipped);
+                  urls.len(), num_added, num_already_registered,
+                  num_skipped);
         self.save()?;
         Ok(())
     }

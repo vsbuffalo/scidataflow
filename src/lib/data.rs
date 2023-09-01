@@ -551,6 +551,10 @@ impl DataCollection {
         }
     }
 
+    pub async fn contains(&self, filename: &str) -> Result<bool> {
+        Ok(self.files.contains_key(filename))
+    }
+
     pub async fn update(&mut self, filename: Option<&String>, path_context: &Path) -> Result<()> {
         match filename {
             Some(file) => {
@@ -1002,7 +1006,7 @@ impl DataCollection {
         }
 
         // now retrieve all the files in the queue.
-        downloads.retrieve(Some(" - {}"), Some("No files downloaded.")).await?;
+        downloads.retrieve(Some(" - {}"), Some("No files downloaded."), true).await?;
 
         let num_skipped = overwrite_skipped.len() + current_skipped.len() +
             messy_skipped.len();
