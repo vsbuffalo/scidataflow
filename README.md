@@ -61,7 +61,7 @@ Project data status:
 Now, let's imagine a pipeline runs and changes this file: 
 
 ```console
-$ console tools/computational_pipeline.sh # changes data
+$ bash tools/computational_pipeline.sh # changes data
 $ sdf status 
 Project data status:
 0 files on local and remotes (1 file only local, 0 files only remote), 1 file total.
