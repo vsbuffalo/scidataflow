@@ -36,20 +36,20 @@ language](https://www.rust-lang.org). The `sdf` tool has a Git-like interface.
 If you know Git, using it will be easy, e.g. to initialize SciDataFlow for a
 project you'd use:
 
-```bash
+```console
 $ sdf init
 ```
 
 Registering a file in the manifest: 
 
-```bash
+```console
 $ sdf add data/population_sizes.tsv
 Added 1 file.
 ```
 
 Checking to see if a file has changed, we'd use `sdf status`:
 
-```bash
+```console
 $ sdf status
 Project data status:
 0 files on local and remotes (1 file only local, 0 files only remote), 1 file total.
@@ -60,8 +60,8 @@ Project data status:
 
 Now, let's imagine a pipeline runs and changes this file: 
 
-```bash
-$ bash tools/computational_pipeline.sh # changes data
+```console
+$ console tools/computational_pipeline.sh # changes data
 $ sdf status 
 Project data status:
 0 files on local and remotes (1 file only local, 0 files only remote), 1 file total.
@@ -74,7 +74,7 @@ Project data status:
 If these changes are good, we can tell the Data Manifest it should update it's
 record of this version:
 
-```bash 
+```console 
 $ sdf update data/population_sizes.tsv
 $ sdf status
 Project data status:
@@ -99,7 +99,7 @@ SciDataFlow also saves researchers' time when submitting supplementary data to
 services like Zenodo or FigShare. Simply link the remote service (you'll need
 to first get an API access token from their website):
 
-```bash
+```console
 $ sdf link  data/ zenodo <TOKEN> --name popsize_study
 ```
 
@@ -113,13 +113,13 @@ keeping track of locally. Sometimes you just want to use SciDataFlow to track
 local changes. So, in addition to files being registered in the Data Manifest,
 you can also tell them you'd like to *track* them:
 
-```bash
+```console
 $ sdf track data/population_sizes.tsv
 ```
 
 Now, you can check the status on remotes too with:
 
-```bash
+```console
 $ sdf status --remotes
 Project data status:
 1 file local and tracked by a remote (0 files only local, 0 files only remote), 1 file total.
@@ -130,7 +130,7 @@ Project data status:
 
 Then, to upload these files to Zenodo, all we'd do is:
 
-```bash
+```console
 $ ../target/debug/sdf push
 Info: uploading file "data/population_sizes.tsv" to Zenodo
 Uploaded 1 file.
@@ -149,7 +149,7 @@ files).
 
 First, you'd clone the repository: 
 
-```bash
+```console
 $ git clone git@github.com:mclintock/maize_liftover
 $ cd maize_liftover/
 ```
@@ -158,7 +158,7 @@ Then, as long as a `data_manifest.yml` exists in the root project directory
 (`maize_liftover/` in this example), SciDataFlow is initialized. You can verify
 this by using:
 
-```bash
+```console
 $ sdf status  --remotes
 Project data status:
 1 file local and tracked by a remote (0 files only local, 0 files only remote), 1 file total.
@@ -170,7 +170,7 @@ Project data status:
 
 Now, to retrieve these files, all you'd need to do is: 
 
-```bash
+```console
 $ sdf pull 
 Downloaded 1 file.
  - population_sizes.tsv
@@ -180,7 +180,7 @@ Skipped 0 files. Reasons:
 Note that if you run `sdf pull` again, it will not redownload the file (this is
 to over overwriting the local version, should it have been changed): 
 
-```bash
+```console
 $ sdf pull
 No files downloaded.
 Skipped 1 files. Reasons:
@@ -206,14 +206,14 @@ where these files come from in the Data Manifest, so we want to combine a
 download with a `sdf add`. The command `sdf get` does this all for you — let's
 imagine you want to get all human coding sequences. You could do this with: 
 
-```bash
+```console
 $ sdf get https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/cds/Homo_sapiens.GRCh38.cds.all.fa.gz
 ⠄ [================>                       ] 9639693/22716351 (42%) eta 00:00:08
 ```
 
 Now, it would show up in the Data Manifest:
 
-```bash
+```console
 $ sdf status --remotes
 Project data status:
 0 files local and tracked by a remote (0 files only local, 0 files only remote), 1 files total.
@@ -234,7 +234,7 @@ is that it should take mere seconds to pull in all data needed for a large
 genomics project (or astronomy, or ecology, whatever). Here's an example TSV
 file full of links:
 
-```bash
+```console
 $ cat human_annotation.tsv
 type	url
 cdna	https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz
@@ -244,7 +244,7 @@ cds	https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/cds/Homo_sapiens.
 
 Note that this has a header, and the URLs are in the second column. To get this data, we'd use: 
 
-```bash
+```console
 $ sdf bulk human_annotation.tsv --column 1 --header
 ⠁ [                                        ] 0/2 (0%) eta 00:00:00
 ⠉ [====>                                   ] 9071693/78889691 (11%) eta 00:01:22
@@ -256,14 +256,14 @@ default. Note that in this example, only two files are downloading — this is
 because `sdf` detected the CDS file already existed. SciDataFlow tells you this
 with a little message at the end: 
 
-```bash 
+```console 
 $ sdf bulk human_annotation.tsv --column 1 --header
 3 URLs found in 'human_annotation.tsv.'
 2 files were downloaded, 2 added to manifest (0 were already registered).
 1 files were skipped because they existed (and --overwrite was no specified).
 ```
 
-### Adding Metadata
+## Adding Metadata
 
 Some data repository services like Zenodo allow data depositions to be
 associated with a creator's metadata (e.g. full name, email, affiliation).
@@ -271,14 +271,14 @@ SciDataFlow automatically propagates this from a file in
 `~/.scidataflow_config`. You can set your user metadata (which should be done
 early on, sort of like with Git) with:
 
-```bash
+```console
 $ sdf config --name "Joan B. Scientist" --email "joanbscientist@berkeley.edu" --affiliation "UC Berkeley"
 ```
 
 Projects can also have store metadata, such as a title and description. This is
 kept in the Data Manifest. You can set this manually with: 
 
-```bash
+```console
 $ sdf metadata --title "genomics_analysis" --description "A re-analysis of Joan's data."
 ```
 
@@ -331,7 +331,7 @@ scientific assets on GitHub that are continuously updated and reused. Then,
 rather than a researcher beginning a project by navigating many websites for
 human genome annotation or data, they might do something like:
 
-```bash
+```console
 $ mkdir -p new_adna_analysis/data/annotation
 $ cd new_adna_analysis/data/annotation
 $ git clone git@github.com:human_genome_assets/decode_recmap_hg38
@@ -359,7 +359,7 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Then, to install SciDataFlow, just run:
 
-```bash 
+```console 
 $ cargo install scidataflow
 ```
 
