@@ -17,22 +17,36 @@ usage: scf [--help] <subcommand>
 
 Some examples:
 
-  # initialize a new project
-  scf init
+  Set up a your user metadata:
+  $ sdf config --name \"Joan B. Scientist\" --email \"joanbscientist@berkeley.edu\" 
+     --affiliation \"UC Berkeley\"
 
-  # get data status
-  scf status
+  Initialize a new project: 
+  $ sdf init
 
-  # get data sizes, etc.
-  scf stats
-
-  # pull in data
-  scf pull
+  Get data status (use --remotes for remote status and/or --all for all remote files):
+  $ sdf status
  
-  # link the directory data/supplement/ to figshare 
-  # use the given token
-  scf link  data/supplement figshare <token> [--name figshare project name]
+  Link the directory data/supplement/ to FigShare (requires API token):
+  $ sdf link  data/supplement FigShare <token> [--name project_name]
 
+  Pull in data (you may want --overwrite):
+  $ sdf pull
+
+  Push data to a remote (you may want --overwrite):
+  $ sdf pull
+
+  Download a file from a URL and register it in the Data Manifest:
+  $ sdf get https://ftp.ensembl.org/some/path/to/large/data.fa.gz
+
+  Bulk download data from a bunch of URLs:
+  $ sdf bulk links_to_data.tsv --column 1  # links are in *second* column
+
+See 'sdf --help' or `sdf <subcommand> --help`. Or, see the README at: 
+https://github.com/vsbuffalo/scidataflow/.
+
+Please submit bugs or feature requests to: 
+https://github.com/vsbuffalo/scidataflow/issues.
 ";
 
 
