@@ -151,8 +151,9 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
     dir_keys.sort();
     for key in dir_keys {
         let statuses = &rows[key];
-        let pretty_key = if color { key.bold().to_string() } else { key.clone() };
-        println!("[{}]", pretty_key);
+        let pretty_key = if key.len() == 0 { "." } else { &key };
+        let prettier_key = if color { pretty_key.bold().to_string() } else { pretty_key.clone().to_string() };
+        println!("[{}]", prettier_key);
 
         // Print the rows with the correct widths
         for status in statuses {
@@ -261,7 +262,6 @@ fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
 
 pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>,
                     all: bool) {
-    println!("--> {:?}", rows);
     println!("{}", "Project data status:".bold());
     let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
     println!("{} local and tracked by a remote ({} only local, {} only remote), {} total.\n", 
