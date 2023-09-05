@@ -1,4 +1,4 @@
-use std::fs::{File,metadata,canonicalize};
+use std::fs::{File,metadata,canonicalize,rename};
 use anyhow::{anyhow,Result,Context};
 use serde_yaml;
 use serde_derive::{Serialize,Deserialize};
@@ -252,9 +252,9 @@ impl Project {
     }
 
     pub fn relative_path(&self, path: &Path) -> Result<PathBuf> {
-        let absolute_path = canonicalize(path)?;
+        let absolute_path = canonicalize(path).context(format!("Failed to canonicalize path '{}'.", path.to_string_lossy()))?;
         //ensure_directory(&absolute_path)?;
-        let path_context = canonicalize(self.path_context())?;
+        let path_context = canonicalize(self.path_context()).context(format!("Failed to canonicalize path '{}'.", path.to_string_lossy()))?;
 
         // Compute relative path directly using strip_prefix
         match absolute_path.strip_prefix(&path_context) {
@@ -264,7 +264,11 @@ impl Project {
     }
 
     pub fn relative_path_string(&self, path: &Path) -> Result<String> {
-        Ok(self.relative_path(path)?.to_string_lossy().to_string())
+        if !path.exists() {
+            Err(anyhow!("Path '{}' does not exist.", path.to_string_lossy()))
+        } else {
+            Ok(self.relative_path(path)?.to_string_lossy().to_string())
+        }
     }
 
     pub async fn status(&mut self, include_remotes: bool, all: bool) -> Result<()> {
@@ -385,6 +389,35 @@ impl Project {
         Ok(())
     }
 
+    // Move a file within the project.
+    // 
+    // Note: file moving is done within relatively higher project-level API. 
+    // The reason why is that we need to access Project::relative_path_string() for
+    // both the source *and* destination; the latter does not exist until after the file 
+    // has been successfully moved. So the updating is all done on the DataFile
+    // directly, since lower interfaces cannot access the relative path.
+    pub async fn mv(&mut self, source: &str, destination: &str) -> Result<()> {
+        let source_path = self.relative_path_string(Path::new(source))?;
+        if let Some(file) = self.data.files.remove(&source_path) {
+            // move the actual file
+            rename(source, destination).context("Error encountered when moving file.")?;
+
+            // update the relative path
+            let relative_destination = self.relative_path_string(Path::new(destination))?;
+
+            // modify the DataFile
+            let mut new_file = file.clone();
+            new_file.path = relative_destination;
+
+            // insert it back into the map with the new key
+            self.data.files.insert(destination.to_string(), new_file);
+
+            self.save()
+        } else {
+            Err(anyhow!("Cannot move file '{}' with 'sdf mv' since it is not in the manifest.", source))
+        }
+    }
+
     pub async fn get(&mut self, url: &str, filename: Option<&str>, 
                      overwrite: bool) -> Result<()> {
         let mut downloads = Downloads::new();
@@ -475,11 +508,11 @@ impl Project {
         }
         let num_skipped = skipped.len();
         println!("{} URLs found in '{}.'\n\
-                  {} files were downloaded, {} added to manifest ({} were already registered).\n\
-                  {} files were skipped because they existed (and --overwrite was no specified).",
-                  num_lines, filename,
-                  urls.len(), num_added, num_already_registered,
-                  num_skipped);
+                 {} files were downloaded, {} added to manifest ({} were already registered).\n\
+                 {} files were skipped because they existed (and --overwrite was no specified).",
+                 num_lines, filename,
+                 urls.len(), num_added, num_already_registered,
+                 num_skipped);
         self.save()?;
         Ok(())
     }

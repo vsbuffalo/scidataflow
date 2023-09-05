@@ -182,7 +182,11 @@ enum Commands {
         /// The file to track with remote.
         filename: String
     },
-
+    Mv {
+        /// Move or rename a file on the file system and in the manifest.
+        source: String,
+        destination: String
+    },
     #[structopt(name = "push")]
     /// Push all tracked files to remote.
     Push {
@@ -300,6 +304,10 @@ async fn run() -> Result<()> {
         Some(Commands::Untrack { filename }) => {
             let mut proj = Project::new()?;
             proj.untrack(filename)
+        },
+        Some(Commands::Mv { source, destination }) => {
+            let mut proj = Project::new()?;
+            proj.mv(source, destination).await
         },
         Some(Commands::Push { overwrite }) => {
             let mut proj = Project::new()?;

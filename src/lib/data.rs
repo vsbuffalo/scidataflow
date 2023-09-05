@@ -1,6 +1,6 @@
 use std::path::{PathBuf,Path};
 use anyhow::{anyhow,Result};
-use std::fs::{metadata};
+use std::fs::metadata;
 use serde_derive::{Serialize,Deserialize};
 use serde;
 use crate::lib::data::serde::{Serializer,Deserializer};
@@ -668,7 +668,7 @@ impl DataCollection {
         match data_file {
             None => Err(anyhow!("Cannot untrack data file '{}' since it was never added to\
                                 the data manifest.", filepath)),
-            Some(data_file) => data_file.set_untracked()
+            Some(file) => file.set_untracked()
         }
     }
 
