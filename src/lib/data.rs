@@ -655,7 +655,7 @@ impl DataCollection {
             Some(data_file) => {
                 // check that the file isn't empty 
                 // (this is why a path_context is needed)
-                let file_size = data_file.get_size(&path_context)?;
+                let file_size = data_file.get_size(path_context)?;
                 if file_size == 0 {
                     return Err(anyhow!("Cannot track an empty file, and '{}' has a file size of 0.", filepath));
                 }
@@ -938,6 +938,38 @@ impl DataCollection {
         Ok(())
     }
 
+    pub async fn pull_urls(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
+        let mut downloads = Downloads::new();
+        let mut filepaths = Vec::new();
+        let mut skipped = Vec::new();
+        let mut num_downloaded = 0;
+        for data_file in self.files.values() {
+            if let Some(url) = &data_file.url {
+                let full_path = data_file.full_path(path_context)?;
+                let download = downloads.add(url.clone(), Some(&full_path.to_string_lossy()), overwrite)?;
+                if let Some(dl) = download {
+                    let filepath = dl.filename.clone();
+                    filepaths.push(filepath);
+                    num_downloaded += 1;
+                } else {
+                    skipped.push(url.clone());
+                }
+            }
+        }
+
+        if num_downloaded > 0 {
+            println!("Downloaded:");
+        }
+        // grab all the files
+        downloads.retrieve(Some(" - {}"), None, false).await?;
+
+        let num_skipped = skipped.len();
+        println!("{} files were downloaded.\n\
+                  {} files were skipped because they existed (and --overwrite was not specified).",
+                  num_downloaded, num_skipped);
+        Ok(())
+    }
+
     // Download all files
     //
     // TODO: code redundancy with the push method's tracking of
@@ -1000,7 +1032,7 @@ impl DataCollection {
                 if do_download { 
                     if let Some(remote) = self.remotes.get(dir) {
                         let download = remote.get_download_info(merged_file, path_context, overwrite)?;
-                        downloads.list.push(download);
+                        downloads.queue.push(download);
                     }
                 }
             }

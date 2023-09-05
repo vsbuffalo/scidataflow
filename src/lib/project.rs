@@ -434,7 +434,8 @@ impl Project {
             .has_headers(header)
             .from_reader(file);
 
-        let column = column.unwrap_or(0) as usize;
+        // convert 0-indexed to 1; first column is default 
+        let column = column.unwrap_or(0) as usize - 1;
 
         let mut downloads = Downloads::new();
         let mut filepaths = Vec::new();
@@ -495,8 +496,17 @@ impl Project {
         self.save()
     }
 
-    pub async fn pull(&mut self, overwrite: bool) -> Result<()> {
-        self.data.pull(&self.path_context(), overwrite).await }
+    pub async fn pull(&mut self, overwrite: bool, url: bool, all: bool) -> Result<()> {
+        let path_context = self.path_context();
+        if all {
+            self.data.pull_urls(&path_context, overwrite).await?;
+            return self.data.pull(&path_context, overwrite).await;
+        }
+        if url {
+            return self.data.pull_urls(&path_context, overwrite).await;
+        }
+        self.data.pull(&path_context, overwrite).await
+    }
 
     pub async fn push(&mut self, overwrite: bool) -> Result<()> {
         self.data.push(&self.path_context(), overwrite).await

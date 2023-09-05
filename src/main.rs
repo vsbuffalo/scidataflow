@@ -33,8 +33,14 @@ Some examples:
   Pull in data (you may want --overwrite):
   $ sdf pull
 
+  Pull in data from the URLs in the manifest only (you may want --overwrite)
+  $ sdf pull --url
+
+  Pull in data from URLs and remotes
+  $ sdf pull --all
+ 
   Push data to a remote (you may want --overwrite):
-  $ sdf pull
+  $ sdf push
 
   Download a file from a URL and register it in the Data Manifest:
   $ sdf get https://ftp.ensembl.org/some/path/to/large/data.fa.gz
@@ -186,11 +192,21 @@ enum Commands {
     },
 
     #[structopt(name = "pull")]
-    /// Pull in all tracked files from the remote.
+    /// Pull in all tracked files from the remote. If --urls is set,
+    /// this will (re)-download all files (tracked or not) in that manifest
+    /// from their URLs.
     Pull {
         /// Overwrite local files if they exit.
         #[structopt(long)]
         overwrite: bool,
+
+        /// Pull in files from the URLs, not remotes.
+        #[structopt(long)]
+        urls: bool,
+
+        /// Pull in files from remotes and URLs.
+        #[structopt(long)]
+        all: bool,
 
         // multiple optional directories
         //directories: Vec<PathBuf>,
@@ -289,9 +305,9 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.push(*overwrite).await
         },
-        Some(Commands::Pull { overwrite }) => {
+        Some(Commands::Pull { overwrite, urls, all }) => {
             let mut proj = Project::new()?;
-            proj.pull(*overwrite).await
+            proj.pull(*overwrite, *urls, *all).await
         },
         Some(Commands::Metadata { title, description }) => {
             let mut proj = Project::new()?;

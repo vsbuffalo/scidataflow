@@ -245,13 +245,13 @@ cds	https://ftp.ensembl.org/pub/release-110/fasta/homo_sapiens/cds/Homo_sapiens.
 Note that this has a header, and the URLs are in the second column. To get this data, we'd use: 
 
 ```console
-$ sdf bulk human_annotation.tsv --column 1 --header
+$ sdf bulk human_annotation.tsv --column 2 --header
 ⠁ [                                        ] 0/2 (0%) eta 00:00:00
 ⠉ [====>                                   ] 9071693/78889691 (11%) eta 00:01:22
 ⠐ [=========>                              ] 13503693/54514783 (25%) eta 00:00:35
 ```
 
-**Columns indices are zero-indexed** and `sdf bulk` assumes no headers by
+**Columns indices are one-indexed** and `sdf bulk` assumes no headers by
 default. Note that in this example, only two files are downloading — this is
 because `sdf` detected the CDS file already existed. SciDataFlow tells you this
 with a little message at the end: 
@@ -261,6 +261,24 @@ $ sdf bulk human_annotation.tsv --column 1 --header
 3 URLs found in 'human_annotation.tsv.'
 2 files were downloaded, 2 added to manifest (0 were already registered).
 1 files were skipped because they existed (and --overwrite was no specified).
+```
+
+Note that one can also download files from URLs that are in the Data Manifest.
+Suppose that you clone a repository that has no remotes, but each file entry
+has a URL set. Those can be retrieved with:
+
+```console
+$ sdf pull --urls  # if you want to overwrite any local files, use --ovewrite
+```
+
+These may or may not be `tracked`; tracking only indicates whether to *also*
+manage them with a remote like Zenodo or FigShare. In cases where the data file
+can be reliable retrieved from a steady source (e.g. a website like the UCSC
+Genome Browser or Ensembl) you may not want to duplicate it by also tracking
+it. If you want to pull in *everything*, use:
+
+```console
+$ sdf pull --all
 ```
 
 ## Adding Metadata

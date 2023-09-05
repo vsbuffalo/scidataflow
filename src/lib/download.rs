@@ -1,4 +1,5 @@
 use anyhow::{anyhow,Result,Context};
+use std::fs;
 use std::path::PathBuf;
 use reqwest::Url;
 
@@ -9,9 +10,8 @@ use crate::lib::progress::{DEFAULT_PROGRESS_STYLE, DEFAULT_PROGRESS_INC};
 use crate::lib::utils::pluralize;
 
 pub struct Downloads {
-    pub list: Vec<Download>,
+    pub queue: Vec<Download>,
 }
-
 
 pub trait Downloadable {
     fn to_url(self) -> Result<Url>;
@@ -30,10 +30,16 @@ impl Downloadable for Url {
     }
 }
 
+impl Default for Downloads {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Downloads {
     pub fn new() -> Self {
-        let list = Vec::new();
-        Downloads { list }
+        let queue = Vec::new();
+        Downloads { queue }
     }
 
     pub fn add<T: Downloadable>(&mut self, item: T, filename: Option<&str>,
@@ -55,10 +61,10 @@ impl Downloads {
         if file_path.exists() && !overwrite {
             return Ok(None);
         }
- 
+
         let download = Download { url, filename: resolved_filename };
-        self.list.push(download);
-        Ok(Some(self.list.last().ok_or(anyhow::anyhow!("Failed to add download"))?))
+        self.queue.push(download);
+        Ok(Some(self.queue.last().ok_or(anyhow::anyhow!("Failed to add download"))?))
     }
 
     pub fn default_style(&self) -> Result<StyleOptions> {
@@ -72,17 +78,41 @@ impl Downloads {
     }
 
 
+    // Retrieve all files in the download queue. 
+    //
+    // Note: if the file is in the queue, at this point it is considered *overwrite safe*.
+    // This is because overwrite-safety is checked at Downloads::add(), per-file.
+    // The trauma crate does not overwrite files; delete must be done manually here 
+    // first if it exists.
     pub async fn retrieve(&self, 
                           success_status: Option<&str>, 
                           no_downloads_message: Option<&str>,
                           show_total: bool) -> Result<()> {
-        let downloads = &self.list;
+        let downloads = &self.queue;
         let total_files = downloads.len();
         if !downloads.is_empty() { 
+
+            // Let's handle the file operations:
+            // 1) Delete the files if they exist, since if it's in the queue, it's 
+            //    overwrite-safe.
+            // 2) Create the directory structure if it does not exist.
+            for file in downloads {
+                let path = PathBuf::from(&file.filename);
+                if path.exists() {
+                    fs::remove_file(&path)?;
+                }
+
+                if let Some(parent_dir) = path.parent() {
+                    if !parent_dir.exists() {
+                        fs::create_dir_all(parent_dir)?;
+                    }
+                }
+            }
+
             let downloader = DownloaderBuilder::new()
                 .style_options(self.default_style()?)
                 .build();
-            downloader.download(&downloads).await;
+            downloader.download(downloads).await;
             if show_total {
                 let punc = if total_files > 0 { "." } else { ":" };
                 println!("Downloaded {}{}", pluralize(total_files as u64, "file"), punc);
@@ -95,10 +125,8 @@ impl Downloads {
                     println!("{}", msg.replace("{}", &name_str.to_string_lossy()));
                 }
             }
-        } else {
-            if no_downloads_message.is_some() {
-                println!("{}", no_downloads_message.unwrap_or(""));
-            }
+        } else if no_downloads_message.is_some() {
+            println!("{}", no_downloads_message.unwrap_or(""));
         }
         Ok(())
     }

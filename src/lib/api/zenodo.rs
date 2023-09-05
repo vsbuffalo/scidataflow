@@ -268,8 +268,7 @@ impl ZenodoAPI {
         let mut matches_found: Vec<_> = depositions.into_iter().filter(|a| a.title == self.name).collect();
         if !matches_found.is_empty() {
             if matches_found.len() > 1 {
-                return Err(anyhow!("Found multiple Zenodo Depositions with the \
-                                   title '{}'", self.name));
+                Err(anyhow!("Found multiple Zenodo Depositions with the title '{}'", self.name))
             } else {
                 // We need to do one more API call, to get the full listing
                 // with the bucket URL.
@@ -277,10 +276,10 @@ impl ZenodoAPI {
                 let url = format!("deposit/depositions/{}", partial_deposition.id);
                 let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None, None).await?;
                 let deposition: ZenodoDeposition = response.json().await?;
-                return Ok(Some(deposition));
+                Ok(Some(deposition))
             }
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 

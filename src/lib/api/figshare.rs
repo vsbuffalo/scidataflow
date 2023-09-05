@@ -379,13 +379,12 @@ impl FigShareAPI {
         let matches_found: Vec<_> = articles.into_iter().filter(|a| a.title == self.name).collect();
         if !matches_found.is_empty() {
             if matches_found.len() > 1 {
-                return Err(anyhow!("Found multiple FigShare Articles with the \
-                                   title '{}'", self.name));
+                Err(anyhow!("Found multiple FigShare Articles with the title '{}'", self.name))
             } else {
-                return Ok(Some(matches_found[0].clone()));
+                Ok(Some(matches_found[0].clone()))
             }
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 

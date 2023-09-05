@@ -265,11 +265,11 @@ pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&Has
     println!("{}", "Project data status:".bold());
     let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
     println!("{} local and tracked by a remote ({} only local, {} only remote), {} total.\n", 
-             pluralize(counts.both as u64, "file"),
-             pluralize(counts.local as u64, "file"),
-             pluralize(counts.remote as u64, "file"),
+             pluralize(counts.both, "file"),
+             pluralize(counts.local, "file"),
+             pluralize(counts.remote, "file"),
              //pluralize(counts.messy as u64, "file"),
-             pluralize(counts.total as u64, "file"));
+             pluralize(counts.total, "file"));
 
     // this brings the remote name (if there is a corresponding remote) into 
     // the key, so the linked remote can be displayed in the status 
