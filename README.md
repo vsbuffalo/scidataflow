@@ -1,3 +1,7 @@
+![Crates.io](https://img.shields.io/crates/v/scidataflow)
+
+![Crates.io](https://img.shields.io/crates/d/scidataflow)
+
 ![CI tests](https://github.com/vsbuffalo/sciflow/workflows/CI/badge.svg)
 
 ![SciDataFlow logo](https://github.com/vsbuffalo/sciflow/blob/a477fc3a7e612ff4c5d89f3b43e2826b8c90f3b8/logo.png)
