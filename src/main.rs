@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
-use structopt::StructOpt;
 #[allow(unused_imports)]
 use log::{info, trace, debug};
 use tokio::runtime::Builder;
@@ -57,7 +56,8 @@ https://github.com/vsbuffalo/scidataflow/issues.
 
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[clap(name = "sdf")]
+#[clap(about = INFO)]
 struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
@@ -66,88 +66,76 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(Subcommand,StructOpt)]
+#[derive(Subcommand)]
 enum Commands {
-     #[structopt(name = "add")]
     /// Add a data file to the manifest.
     Add {
         /// the file to begin tracking.
-        #[structopt(name = "filenames", required = true)]
+        #[arg(required = true)]
         filenames: Vec<String>,
     },
-     #[structopt(name = "config")]
     /// Set local system-wide metadata (e.g. your name, email, etc.), which 
     /// can be propagated to some APIs.
     Config {
         /// Your name.
-        #[structopt(long)]
+        #[arg(long)]
         name: Option<String>,
         // Your email.
-        #[structopt(long)]
+        #[arg(long)]
         email: Option<String>,
         // Your affiliation.
-        #[structopt(long)]
+        #[arg(long)]
         affiliation: Option<String>,
     },
-    #[structopt(name = "init")]
     /// Initialize a new project.
     Init {
         /// Project name (default: the name of the directory).
-        #[structopt(long)]
+        #[arg(long)]
         name: Option<String>
     },
-    #[structopt(name = "get")]
     /// Download a file from a URL.
     Get {
         /// Download filename (default: based on URL).
         url: String,
-        #[structopt(long)]
+        #[arg(long)]
         name: Option<String>,
         /// Overwrite local files if they exit.
-        #[structopt(long)]
+        #[arg(long)]
         overwrite: bool
     },
-    #[structopt(name = "bulk")]
     /// Download a bunch of files from links stored in a file.
     Bulk {
         /// A TSV or CSV file containing a column of URLs. Type inferred from suffix.
         filename: String,
         /// Which column contains links (default: first).
-        #[structopt(long)]
+        #[arg(long)]
         column: Option<u64>,
         /// The TSV or CSV starts with a header (i.e. skip first line).
-        #[structopt(long)]
+        #[arg(long)]
         header: bool,
         /// Overwrite local files if they exit.
-        #[structopt(long)]
+        #[arg(long)]
         overwrite: bool,
     },
-    #[structopt(name = "status")]
     /// Show status of data.
     Status {
         /// Show remotes status (requires network).
-        #[structopt(long)]
+        #[arg(long)]
         remotes: bool, 
 
         /// Show statuses of all files, including those on remote(s) but not in the manifest.
-        #[structopt(long)]
+        #[arg(long)]
         all: bool
 
     },
-
-    #[structopt(name = "stats")]
     /// Show file size statistics.
     Stats {
     },
-
-    #[structopt(name = "update")]
     /// Update MD5s
     Update {
         /// Which file to update (if not set, all tracked files are update).
         filename: Option<String>,
     },
-
-    #[structopt(name = "link")]
     /// Link a directory to a remote storage solution.
     Link {
         /// Directory to link to remote storage.
@@ -158,25 +146,21 @@ enum Commands {
         key: String,
         /// Project name for remote (default: the metadata title in the data 
         /// manifest, or if that's not set, the directory name).
-        #[structopt(long)]
+        #[arg(long)]
         name: Option<String>,
 
         /// Don't initialize remote, only add to manifest. This will retrieve
         /// the remote information (i.e. the FigShare Article ID or Zenodo
         /// Depository ID) to add to the manifest. Requires network.
-        #[structopt(long)]
+        #[arg(long)]
         link_only: bool
 
     },
-
-    #[structopt(name = "untrack")]
     /// No longer keep track of this file on the remote.
     Untrack {
         /// The file to untrack with remote.
         filename: String
     },
-
-    #[structopt(name = "track")]
     /// Keep track of this file on the remote.
     Track {
         /// The file to track with remote.
@@ -187,46 +171,40 @@ enum Commands {
         source: String,
         destination: String
     },
-    #[structopt(name = "push")]
     /// Push all tracked files to remote.
     Push {
         /// Overwrite remote files if they exit.
-        #[structopt(long)]
+        #[arg(long)]
         overwrite: bool,
     },
-
-    #[structopt(name = "pull")]
     /// Pull in all tracked files from the remote. If --urls is set,
     /// this will (re)-download all files (tracked or not) in that manifest
     /// from their URLs.
     Pull {
         /// Overwrite local files if they exit.
-        #[structopt(long)]
+        #[arg(long)]
         overwrite: bool,
 
         /// Pull in files from the URLs, not remotes.
-        #[structopt(long)]
+        #[arg(long)]
         urls: bool,
 
         /// Pull in files from remotes and URLs.
-        #[structopt(long)]
+        #[arg(long)]
         all: bool,
 
         // multiple optional directories
         //directories: Vec<PathBuf>,
     },
-
-     #[structopt(name = "metadata")]
     /// Update the project metadata.
     Metadata {
         /// The project name.
-        #[structopt(long)]
+        #[arg(long)]
         title: Option<String>,
         // A description of the project.
-        #[structopt(long)]
+        #[arg(long)]
         description: Option<String>,
     },
- 
 }
 
 pub fn print_errors(response: Result<()>) {

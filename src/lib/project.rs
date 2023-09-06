@@ -431,6 +431,7 @@ impl Project {
             // convert to relative path (based on where we are)
             let filepath = self.relative_path_string(Path::new(&filepath))?;
 
+            // TODO: should compare MD5s!
             if !self.data.contains(&filepath).await? {
                 let data_file = DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
 

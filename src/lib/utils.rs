@@ -151,7 +151,7 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
     dir_keys.sort();
     for key in dir_keys {
         let statuses = &rows[key];
-        let pretty_key = if key.len() == 0 { "." } else { &key };
+        let pretty_key = if key.is_empty() { "." } else { key };
         let prettier_key = if color { pretty_key.bold().to_string() } else { pretty_key.clone().to_string() };
         println!("[{}]", prettier_key);
 

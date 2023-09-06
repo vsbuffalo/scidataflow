@@ -392,7 +392,7 @@ to
 ## Contributing to SciDataFlow
 
 If you are a Rust developer, **please** contribute! Here are some great ways to
-get started:
+get started (also check the TODO list below, or for TODOs in code!):
 
  - Write some API tests. See some of the tests in `src/lib/api/zenodo.api` as
    an example.
@@ -405,3 +405,6 @@ get started:
 
  - Improve the documentation!
 
+## Todo
+
+ - [] `sdf mv` tests, within different directories.
