@@ -115,7 +115,6 @@ mod tests {
     async fn test_add_already_added_error() {
         let mut fixture = setup(true).await;
 
-        println!("DATAAAA: {:?}", fixture.project.data);
         if let Some(files) = &fixture.env.files {
             for file in files {
                 let mut file_list = Vec::new();
