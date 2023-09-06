@@ -2,8 +2,7 @@
 name = "scidataflow"
 version = "0.8.0"
 edition = "2021"
-include = ["src/**/*", "tests/test_data/**/*"]
-exclude = ["logo.png"]
+exclude = ["logo.png", "tests/test_data/**"]
 license = "MIT"
 keywords = ["science", "reproducibility", "bioinformatics", "data"]
 categories = ["command-line-utilities", "science"]
