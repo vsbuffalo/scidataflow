@@ -33,6 +33,9 @@ you.
 
 ## A Simple Workflow Example
 
+If you'd like to follow the example along, first [install
+SciDataFlow](#installing-scidataflow).
+
 The user interacts with the Data Manifest through the fast and concurrent
 command line tool `sdf` written in the inimitable [Rust
 language](https://www.rust-lang.org). The `sdf` tool has a Git-like interface.
@@ -370,9 +373,23 @@ asset; all it takes is a mere `sdf pull --overwrite`.
 
 ## Installing SciDataFlow
 
-To install the SciDataFlow tool `sdf` from source, you'll first need to install
-the Rust Programming Language. See this page for more info, but if you just
-want to get up and running, you can run: 
+The easiest way to install SciDataFlow is to use the easy install script, which
+detects if you have Rust on your system, and if not installs it. Then it will
+install SciDataFlow via Rust's incredible `cargo` system. To run the easy
+install script:
+
+    $ https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/easy_install.sh | sh
+
+If you are security-conscious, you can check the MD5 of SHA1 digests as below:
+
+    $ curl https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/easy_install.sh | md5
+    75d205a92b63f30047c88ff7e3de1a9f
+
+    $ curl https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/easy_install.sh | sha256sum
+    0a654048b932a237cb93a9359900919188312867c3b7aeea23843272bc616a71  -
+
+If you'd like to the Rust Programming Language manually, [see this
+page](https://www.rust-lang.org/tools/install), which instructs you to run:
 
 ```
 $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
