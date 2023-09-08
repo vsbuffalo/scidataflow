@@ -77,7 +77,7 @@ Project data status:
 
 ```
 
-If these changes are good, we can tell the Data Manifest it should update it's
+If these changes are good, we can tell the Data Manifest it should update its
 record of this version:
 
 ```console 
@@ -378,7 +378,7 @@ detects if you have Rust on your system, and if not installs it. Then it will
 install SciDataFlow via Rust's incredible `cargo` system. To run the easy
 install script:
 
-    $ https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/easy_install.sh | sh
+    $ https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/easy_install.sh | bash
 
 If you are security-conscious, you can check the MD5 of SHA1 digests as below:
 

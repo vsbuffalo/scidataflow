@@ -12,7 +12,7 @@ pub mod logging_setup;
 
 const INFO: &str = "\
 SciDataFlow: Manage and Share Scientific Data
-usage: scf [--help] <subcommand>
+usage: sdf [--help] <subcommand>
 
 Some examples:
 
