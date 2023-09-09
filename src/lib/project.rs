@@ -107,8 +107,8 @@ impl Project {
         let config_path = config_path()?;
         let mut file = File::open(&config_path)
             .map_err(|_| anyhow!("No SciDataFlow config found at \
-                                 {:?}. Please set with sdf config --user <NAME> \
-                                 [--email <EMAIL> --affil <AFFILIATION>]", &config_path))?;
+                                 {:?}. Please set with sdf config --name <NAME> \
+                                 [--email <EMAIL> --affiliation <AFFILIATION>]", &config_path))?;
                                  let mut contents = String::new();
                                  file.read_to_string(&mut contents)?;
 
