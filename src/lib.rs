@@ -11,6 +11,7 @@ pub mod lib {
     pub mod macros;
     pub mod remote;
     pub mod utils;
+    pub mod assets;
     pub mod test_utilities;
 }
 

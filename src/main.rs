@@ -1,7 +1,11 @@
+use std::path::Path;
+
 use clap::{Parser, Subcommand};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 #[allow(unused_imports)]
 use log::{info, trace, debug};
+use scidataflow::lib::assets::GitHubRepo;
+use scidataflow::lib::download::Downloads;
 use tokio::runtime::Builder;
 
 
@@ -9,6 +13,8 @@ use scidataflow::lib::project::Project;
 use scidataflow::logging_setup::setup;
 
 pub mod logging_setup;
+
+const SDF_ASSET_URL: &str = "https://github.com/scidataflow-assets";
 
 const INFO: &str = "\
 SciDataFlow: Manage and Share Scientific Data
@@ -142,7 +148,17 @@ enum Commands {
         #[arg(required = true)]
         filenames: Vec<String>,
     },
-
+    /// Retrieve a SciDataFlow Asset
+    Asset {
+        /// A GitHub link
+        #[arg(long)]
+        github: Option<String>,
+        /// A URL to a data_manifest.yml file
+        #[arg(long)]
+        url: Option<String>,
+        /// A SciDataFlow Asset name
+        asset: Option<String>
+    },
     /// Link a directory to a remote storage solution.
     Link {
         /// Directory to link to remote storage.
@@ -309,6 +325,33 @@ async fn run() -> Result<()> {
         Some(Commands::Metadata { title, description }) => {
             let mut proj = Project::new()?;
             proj.set_metadata(title, description)
+        },
+        Some(Commands::Asset { github, url, asset }) => {
+            if Path::new("data_manifest.yml").exists() {
+                return Err(anyhow!("data_manifest.yml already exists in the current directory; delete it manually first to use sdf asset."));
+            }
+            let msg = "Set either --github, --url, or specify an SciDataFlow Asset name.";
+            let url = match (github, url, asset) {
+                (Some(gh), None, None) => {
+                    let gh = GitHubRepo::new(&gh).map_err(|e| {
+                        anyhow!("GitHubRepo initialization failed: {}", e)
+                    })?;
+                    gh.url("data_manifest.yml")
+                },
+                (None, None, Some(asset)) => {
+                    let url = format!("{}/{}", SDF_ASSET_URL, asset);
+                    let gh = GitHubRepo::new(&url).expect("Internal Error: invalid Asset URL; please report.");
+                    gh.url("data_manifest.yml")
+                },
+                (None, Some(url), None) => {
+                    url.to_string()
+                },
+                _ => return Err(anyhow!(msg))
+            };
+            let mut downloads = Downloads::new();
+            downloads.add(url.clone(), None, false)?;
+            downloads.retrieve(None, None, false).await?;
+            Ok(())
         },
         None => {
             println!("{}\n", INFO);
