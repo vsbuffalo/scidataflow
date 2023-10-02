@@ -333,7 +333,7 @@ async fn run() -> Result<()> {
             let msg = "Set either --github, --url, or specify an SciDataFlow Asset name.";
             let url = match (github, url, asset) {
                 (Some(gh), None, None) => {
-                    let gh = GitHubRepo::new(&gh).map_err(|e| {
+                    let gh = GitHubRepo::new(gh).map_err(|e| {
                         anyhow!("GitHubRepo initialization failed: {}", e)
                     })?;
                     gh.url("data_manifest.yml")

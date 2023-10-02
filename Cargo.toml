@@ -1,6 +1,6 @@
 [package]
 name = "scidataflow"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 exclude = ["logo.png", "tests/test_data/**"]
 license = "MIT"
