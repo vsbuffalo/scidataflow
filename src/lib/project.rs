@@ -271,6 +271,18 @@ impl Project {
         }
     }
 
+    pub async fn remove(&mut self, files: &Vec<String>) -> Result<()> {
+        let mut num_removed = 0;
+        for filename in files {
+            info!("Removing file '{}'.", filename);
+            let filepath = self.relative_path_string(Path::new(filename))?;
+            let removed = self.data.remove(&filepath).await;
+            num_removed += removed as i32;
+        }
+        println!("Removed {}.", pluralize(num_removed as u64, "file"));
+        self.save()
+    }
+
     pub async fn status(&mut self, include_remotes: bool, all: bool) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.

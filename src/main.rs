@@ -136,6 +136,13 @@ enum Commands {
         /// Which file to update (if not set, all tracked files are update).
         filename: Option<String>,
     },
+    /// Remove a file from the manifest
+    Rm {
+        /// Which file(s) to remove from the manifest (these are not deleted).
+        #[arg(required = true)]
+        filenames: Vec<String>,
+    },
+
     /// Link a directory to a remote storage solution.
     Link {
         /// Directory to link to remote storage.
@@ -166,8 +173,8 @@ enum Commands {
         /// The file to track with remote.
         filename: String
     },
+    /// Move or rename a file on the file system and in the manifest.
     Mv {
-        /// Move or rename a file on the file system and in the manifest.
         source: String,
         destination: String
     },
@@ -266,6 +273,10 @@ async fn run() -> Result<()> {
             //let proj = Project::new()?;
             //proj.stats()
             Ok(())
+        }
+        Some(Commands::Rm { filenames }) => {
+            let mut proj = Project::new()?;
+            proj.remove(filenames).await
         }
         Some(Commands::Update { filename }) => {
             let mut proj = Project::new()?;
