@@ -337,11 +337,38 @@ impl Project {
         self.save()
     }
 
-    pub async fn update(&mut self, filepath: Option<&String>) -> Result<()> {
+    pub async fn update(&mut self, files: Option<&Vec<String>>) -> Result<()> {
         let path_context = self.path_context();
-        self.data.update(filepath, &path_context).await?;
+        let mut num_updated = 0;
+
+        let filepaths: Result<Vec<String>> = match files {
+            None => Ok(self.data.files.keys().cloned().collect::<Vec<String>>()),
+            Some(file_list) => {
+                file_list.iter()
+                    .map(|f| {
+                        Ok(self.relative_path(Path::new(&f))?.to_string_lossy().to_string())
+                    })
+                .collect()
+            }
+        };
+
+        let filepaths = filepaths?;  // Use ? here to propagate any errors
+
+        for filepath in filepaths {
+            match self.data.update(Some(&filepath), &path_context).await {
+                Ok(_) => {
+                    info!("Updated file '{}'.", filepath);
+                    num_updated += 1;
+                }
+                Err(e) => {
+                    return Err(anyhow!("Failed to update file '{}': {}", filepath, e));
+                }
+            }
+        }
+        println!("Updated {}.", pluralize(num_updated as u64, "file"));
         self.save()
     }
+
 
     pub async fn link(&mut self, dir: &str, service: &str, 
                       key: &str, name: &Option<String>, link_only: &bool) -> Result<()> {

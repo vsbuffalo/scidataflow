@@ -140,7 +140,11 @@ enum Commands {
     /// Update MD5s
     Update {
         /// Which file to update (if not set, all tracked files are update).
-        filename: Option<String>,
+        #[arg(required = false)]
+        filenames: Vec<String>,
+        /// Update all files presently registered in the manifest.
+        #[arg(long)]
+        all: bool
     },
     /// Remove a file from the manifest
     Rm {
@@ -219,7 +223,7 @@ enum Commands {
         // multiple optional directories
         //directories: Vec<PathBuf>,
     },
-    /// Update the project metadata.
+    /// Change the project metadata.
     Metadata {
         /// The project name.
         #[arg(long)]
@@ -294,9 +298,17 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.remove(filenames).await
         }
-        Some(Commands::Update { filename }) => {
+        Some(Commands::Update { filenames, all }) => {
             let mut proj = Project::new()?;
-            proj.update(filename.as_ref()).await
+            if !*all && filenames.is_empty() {
+                return Err(anyhow!("Specify --all or one or more file to update."));
+            }
+            let filepaths = if *all {
+                None
+            } else {
+                Some(filenames)
+            };
+            proj.update(filepaths).await
         }
         Some(Commands::Link { dir, service, key, name, link_only }) => {
             let mut proj = Project::new()?;
