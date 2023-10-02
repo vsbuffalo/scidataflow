@@ -100,7 +100,8 @@ mod tests {
         let re_add_files = vec![file_to_check.to_string_lossy().to_string()];
 
         for file in &re_add_files {
-            let result = fixture.project.update(Some(&file)).await;
+            let files = vec![file.clone()];
+            let result = fixture.project.update(Some(&files)).await;
             assert!(result.is_ok(), "re-adding raised Error!");
         }
         

@@ -388,7 +388,6 @@ impl DataFile {
         path_context.join(&self.path).exists()
     }
 
-
     // Returns true if the file does not exist.
     pub async fn is_changed(&self, path_context: &Path) -> Result<bool> {
         match self.get_md5(path_context).await? {
@@ -571,6 +570,8 @@ impl DataCollection {
                 if let Some(data_file) = self.files.get_mut(file) {
                     data_file.update(path_context).await?;
                     debug!("rehashed file {:?}", data_file.path);
+                } else {
+                    return Err(anyhow!("File '{}' does not exist.", file));
                 }
             }
             None => {
