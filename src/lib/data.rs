@@ -555,6 +555,16 @@ impl DataCollection {
         Ok(self.files.contains_key(filename))
     }
 
+    pub async fn remove(&mut self, filename: &str) -> bool {
+        if self.files.contains_key(filename) {
+            self.files.remove(filename);
+            true
+        } else {
+            println!("File '{}' is not registered in the manifest, so it was not removed.", filename);
+            false
+        }
+    }
+
     pub async fn update(&mut self, filename: Option<&String>, path_context: &Path) -> Result<()> {
         match filename {
             Some(file) => {
