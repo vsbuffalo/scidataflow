@@ -34,8 +34,13 @@ you.
 The [SciDataFlow
 manuscript](https://academic.oup.com/bioinformatics/article/40/1/btad754/7511845)
 has been published in *Bioinformatics*. If you use SciDataFlow, please consider
-citing it: V. Buffalo, SciDataFlow: A Tool for Improving the Flow of Data
-through Science. Bioinformatics (2024), doi:10.1093/bioinformatics/btad754.
+citing it: 
+
+    V. Buffalo, SciDataFlow: A Tool for Improving the Flow of Data through Science. 
+    Bioinformatics (2024), doi:10.1093/bioinformatics/btad754.
+
+The BibTeX entry can be accessed by clicking "Cite this repository" on the 
+right side of the [main GitHub repository page](https://github.com/vsbuffalo/scidataflow).
 
 ## Documentation
 
