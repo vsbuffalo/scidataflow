@@ -31,6 +31,12 @@ simple, minimal, human and machine readable specification. But you don't need
 to know the specifics — the simple `sdf` command line tool handles it all for
 you.
 
+The [SciDataFlow
+manuscript](https://academic.oup.com/bioinformatics/article/40/1/btad754/7511845)
+has been published in *Bioinformatics*. If you use SciDataFlow, please consider
+citing it: V. Buffalo, SciDataFlow: A Tool for Improving the Flow of Data
+through Science. Bioinformatics (2024), doi:10.1093/bioinformatics/btad754.
+
 ## Documentation
 
 SciDataFlow has [extensive
