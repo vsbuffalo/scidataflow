@@ -1,11 +1,11 @@
 ![Crates.io](https://img.shields.io/crates/v/scidataflow) ![Crates.io](https://img.shields.io/crates/d/scidataflow) ![CI tests](https://github.com/vsbuffalo/sciflow/workflows/CI/badge.svg)
 
-![SciDataFlow logo](https://github.com/vsbuffalo/sciflow/blob/a477fc3a7e612ff4c5d89f3b43e2826b8c90f3b8/logo.png)
+![SciDataFlow logo](https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/logo.png)
 
 
 # SciDataFlow — Facilitating the Flow of Data in Science
 
-![SciDataFlow demo screencast](https://github.com/vsbuffalo/scidataflow/blob/6c7294f33498b9d77e4e0b830502b9c0719ed6db/screencast.gif)
+![SciDataFlow demo screencast](https://raw.githubusercontent.com/vsbuffalo/scidataflow/main/screencast.gif)
 
 **Problem 1**: Have you ever wanted to reuse and build upon a research
 project's output or supplementary data, but can't find it?
