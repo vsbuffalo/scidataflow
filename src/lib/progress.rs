@@ -1,8 +1,8 @@
-use indicatif::{ProgressBar, ProgressStyle};
-use std::time::Duration;
-use std::thread;
-use std::sync::mpsc::{self, Sender, Receiver};
 use anyhow::Result;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+use std::time::Duration;
 
 // these are separated since some APIs don't overload
 // indicatif bars, but take the same primitives.
@@ -20,7 +20,7 @@ pub struct Progress {
     pub bar: ProgressBar,
     stop_spinner: Sender<()>,
     #[allow(dead_code)]
-    spinner: Option<thread::JoinHandle<()>>
+    spinner: Option<thread::JoinHandle<()>>,
 }
 
 impl Progress {
@@ -31,16 +31,18 @@ impl Progress {
         let (tx, rx): (Sender<()>, Receiver<()>) = mpsc::channel();
 
         let bar_clone = bar.clone();
-        let spinner = thread::spawn(move || {
-            loop {
-                if rx.try_recv().is_ok() {
-                    break;
-                }
-                bar_clone.tick();
-                thread::sleep(Duration::from_millis(20));
+        let spinner = thread::spawn(move || loop {
+            if rx.try_recv().is_ok() {
+                break;
             }
+            bar_clone.tick();
+            thread::sleep(Duration::from_millis(20));
         });
-        Ok(Progress { bar, stop_spinner: tx, spinner: Some(spinner) })
+        Ok(Progress {
+            bar,
+            stop_spinner: tx,
+            spinner: Some(spinner),
+        })
     }
 }
 
@@ -52,4 +54,3 @@ impl Drop for Progress {
         }
     }
 }
-

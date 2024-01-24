@@ -1,23 +1,24 @@
-use anyhow::{anyhow,Result,Context};
-use std::path::Path;
-use reqwest::{Method, header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_LENGTH}};
-use reqwest::{Client, Response, Body};
-use std::collections::HashMap;
-use serde_derive::{Serialize,Deserialize};
-#[allow(unused_imports)]
-use log::{info, trace, debug};
+use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
+#[allow(unused_imports)]
+use log::{debug, info, trace};
+use reqwest::{
+    header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE},
+    Method,
+};
+use reqwest::{Body, Client, Response};
+use serde_derive::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::convert::TryInto;
+use std::path::Path;
 use tokio_util::io::ReaderStream;
 
 #[allow(unused_imports)]
-use crate::{print_info,print_warn};
+use crate::{print_info, print_warn};
 
-
+use crate::lib::remote::{AuthKeys, RemoteFile, RequestData};
+use crate::lib::utils::{shorten, ISSUE_URL};
 use crate::lib::{data::DataFile, project::LocalMetadata};
-use crate::lib::remote::{AuthKeys,RemoteFile,RequestData};
-use crate::lib::utils::{ISSUE_URL, shorten};
-
 
 const BASE_URL: &str = "https://zenodo.org/api";
 
@@ -41,8 +42,7 @@ pub struct ZenodoDeposition {
     title: String,
 }
 
-
-#[allow(dead_code)]  // used for deserialization of requests
+#[allow(dead_code)] // used for deserialization of requests
 #[derive(Debug, Deserialize)]
 pub struct ZenodoFileUpload {
     key: String,
@@ -56,7 +56,6 @@ pub struct ZenodoFileUpload {
     is_head: bool,
     delete_marker: bool,
 }
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ZenodoFile {
@@ -74,7 +73,7 @@ impl From<ZenodoFile> for RemoteFile {
             md5: Some(znd.checksum),
             size: Some(znd.filesize as u64),
             remote_service: "Zenodo".to_string(),
-            url: znd.links.download
+            url: znd.links.download,
         }
     }
 }
@@ -97,7 +96,7 @@ pub struct ZenodoLinks {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 struct Creator {
     name: String,
-    affiliation: Option<String>
+    affiliation: Option<String>,
 }
 
 // We need this wrapper to provide the metadata
@@ -121,17 +120,23 @@ impl TryInto<ZenodoDepositionData> for LocalMetadata {
     type Error = anyhow::Error;
 
     fn try_into(self) -> Result<ZenodoDepositionData> {
-        let name = self.author_name.ok_or_else(|| anyhow!("Author name is required"))?;
+        let name = self
+            .author_name
+            .ok_or_else(|| anyhow!("Author name is required"))?;
         // TODO? Warn user of default description?
-        let description = self.description.unwrap_or("Upload by SciDataFlow.".to_string());
+        let description = self
+            .description
+            .unwrap_or("Upload by SciDataFlow.".to_string());
 
         Ok(ZenodoDepositionData {
             metadata: ZenodoMetadata {
                 prereserve_doi: None,
-                title: self.title.ok_or(anyhow!("Zenodo requires a title be set.\n\
+                title: self.title.ok_or(anyhow!(
+                    "Zenodo requires a title be set.\n\
                                                 Either: \n\
                                                   - set this manually in data_manifest.yml\n\
-                                                  - specify with 'sdf link --name <NAME>'\n"))?,
+                                                  - specify with 'sdf link --name <NAME>'\n"
+                ))?,
                 upload_type: Some("dataset".to_string()),
                 description: Some(description),
                 creators: Some(vec![Creator {
@@ -149,13 +154,18 @@ struct PrereserveDoi {
     recid: usize,
 }
 
-// Remove the BASE_URL from full URLs, e.g. for 
-// bucket_urls provided by Zenodo so they can go through the common 
+// Remove the BASE_URL from full URLs, e.g. for
+// bucket_urls provided by Zenodo so they can go through the common
 // issue_request() method
 fn remove_base_url(full_url: &str) -> Result<String> {
-    full_url.strip_prefix(BASE_URL).map(|s| s.to_string())
-        .ok_or(anyhow!("Internal error: Zenodo BASE_URL not found in full URL: full_url={:?}, BASE_URL={:?}",
-                       full_url, BASE_URL))
+    full_url
+        .strip_prefix(BASE_URL)
+        .map(|s| s.to_string())
+        .ok_or(anyhow!(
+            "Internal error: Zenodo BASE_URL not found in full URL: full_url={:?}, BASE_URL={:?}",
+            full_url,
+            BASE_URL
+        ))
 }
 
 // for serde deserialize default
@@ -163,10 +173,9 @@ fn zenodo_api_url() -> String {
     BASE_URL.to_string()
 }
 
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ZenodoAPI {
-    #[serde(skip_serializing, skip_deserializing,default="zenodo_api_url")]
+    #[serde(skip_serializing, skip_deserializing, default = "zenodo_api_url")]
     base_url: String,
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
@@ -180,11 +189,11 @@ pub struct ZenodoAPI {
 
 impl ZenodoAPI {
     pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
-        // Note: this constructor is not called often, except through 
-        // Project::link(), since serde is usually deserializing the 
+        // Note: this constructor is not called often, except through
+        // Project::link(), since serde is usually deserializing the
         // new ZenodoAPI Remote variant from the manifest.
         let auth_keys = if base_url.is_none() {
-            // using the default base_url means we're 
+            // using the default base_url means we're
             // not using mock HTTP servers
             AuthKeys::new()
         } else {
@@ -196,12 +205,12 @@ impl ZenodoAPI {
         };
         let token = auth_keys.get("zenodo".to_string())?;
         let base_url = base_url.unwrap_or(BASE_URL.to_string());
-        Ok(ZenodoAPI { 
+        Ok(ZenodoAPI {
             base_url,
-            name: name.to_string(), 
+            name: name.to_string(),
             token,
             deposition_id: None,
-            bucket_url: None
+            bucket_url: None,
         })
     }
 
@@ -213,11 +222,19 @@ impl ZenodoAPI {
     // TODO: this is the same as FigShareAPI's issue_request().
     // Since APIs can have different authentication routines, we
     // should handle that part separately.
-    async fn issue_request<T: serde::Serialize + std::fmt::Debug>(&self, method: Method, endpoint: &str,
-                                                                  headers: Option<HeaderMap>,
-                                                                  data: Option<RequestData<T>>) -> Result<Response> {
-
-        let url = format!("{}/{}?access_token={}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'), self.token);
+    async fn issue_request<T: serde::Serialize + std::fmt::Debug>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        headers: Option<HeaderMap>,
+        data: Option<RequestData<T>>,
+    ) -> Result<Response> {
+        let url = format!(
+            "{}/{}?access_token={}",
+            self.base_url.trim_end_matches('/'),
+            endpoint.trim_start_matches('/'),
+            self.token
+        );
         trace!("request URL: {:?}", &url);
 
         let client = Client::new();
@@ -234,8 +251,10 @@ impl ZenodoAPI {
                 let stream = ReaderStream::new(file);
                 let body = Body::wrap_stream(stream);
                 request.body(body)
-            },
-            Some(RequestData::Empty) => request.json(&serde_json::Value::Object(serde_json::Map::new())),
+            }
+            Some(RequestData::Empty) => {
+                request.json(&serde_json::Value::Object(serde_json::Map::new()))
+            }
             None => request,
         };
 
@@ -247,34 +266,57 @@ impl ZenodoAPI {
             Ok(response)
         } else {
             let text = &response.text().await?;
-            Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, &url, text))
+            Err(anyhow!(
+                "HTTP Error: {}\nurl: {:?}\n{:?}",
+                response_status,
+                &url,
+                text
+            ))
         }
     }
 
     pub async fn get_depositions(&self) -> Result<Vec<ZenodoDeposition>> {
-        let response = self.issue_request::<HashMap<String,String>>(Method::GET, "/deposit/depositions", None, None).await?;
+        let response = self
+            .issue_request::<HashMap<String, String>>(
+                Method::GET,
+                "/deposit/depositions",
+                None,
+                None,
+            )
+            .await?;
         let info: Vec<ZenodoDeposition> = response.json().await?;
         Ok(info)
     }
 
     pub async fn get_deposition_exists(&self) -> Result<bool> {
         let depositions = self.get_depositions().await?;
-        let matches_found: Vec<_> = depositions.iter().filter(|&a| a.title == self.name).collect();
-        Ok(!matches_found.is_empty()) 
+        let matches_found: Vec<_> = depositions
+            .iter()
+            .filter(|&a| a.title == self.name)
+            .collect();
+        Ok(!matches_found.is_empty())
     }
 
     pub async fn find_deposition(&self) -> Result<Option<ZenodoDeposition>> {
         let depositions = self.get_depositions().await?;
-        let mut matches_found: Vec<_> = depositions.into_iter().filter(|a| a.title == self.name).collect();
+        let mut matches_found: Vec<_> = depositions
+            .into_iter()
+            .filter(|a| a.title == self.name)
+            .collect();
         if !matches_found.is_empty() {
             if matches_found.len() > 1 {
-                Err(anyhow!("Found multiple Zenodo Depositions with the title '{}'", self.name))
+                Err(anyhow!(
+                    "Found multiple Zenodo Depositions with the title '{}'",
+                    self.name
+                ))
             } else {
                 // We need to do one more API call, to get the full listing
                 // with the bucket URL.
                 let partial_deposition = matches_found.remove(0);
                 let url = format!("deposit/depositions/{}", partial_deposition.id);
-                let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None, None).await?;
+                let response = self
+                    .issue_request::<HashMap<String, String>>(Method::GET, &url, None, None)
+                    .await?;
                 let deposition: ZenodoDeposition = response.json().await?;
                 Ok(Some(deposition))
             }
@@ -287,7 +329,10 @@ impl ZenodoAPI {
     //
     // Note that this uses LocalMetadata to propagate some of the Zenodo metadata fields
     // However, the title field is overwritten by ZenodoAPI.name.
-    pub async fn create_deposition(&self, local_metadata: LocalMetadata) -> Result<ZenodoDeposition> {
+    pub async fn create_deposition(
+        &self,
+        local_metadata: LocalMetadata,
+    ) -> Result<ZenodoDeposition> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -298,7 +343,9 @@ impl ZenodoAPI {
         let deposition_data: ZenodoDepositionData = metadata_copy.try_into()?;
 
         let data = Some(RequestData::Json(deposition_data));
-        let response = self.issue_request(Method::POST, "/deposit/depositions", Some(headers), data).await?;
+        let response = self
+            .issue_request(Method::POST, "/deposit/depositions", Some(headers), data)
+            .await?;
         let deposition: ZenodoDeposition = response.json().await?;
         Ok(deposition)
     }
@@ -306,14 +353,21 @@ impl ZenodoAPI {
     // Initialize the data collection on the Remote
     //
     // For Zenodo, this creates a new "deposition"
-    pub async fn remote_init(&mut self, local_metadata: LocalMetadata, link_only: bool) -> Result<()> {
+    pub async fn remote_init(
+        &mut self,
+        local_metadata: LocalMetadata,
+        link_only: bool,
+    ) -> Result<()> {
         // Step 1: Check if a deposition already exists
         let found_match = self.find_deposition().await?;
 
         let info = if let Some(existing_info) = found_match {
             if !link_only {
-                return Err(anyhow!("An existing Zenodo Deposition with the title \
-                                   '{}' was found. Use --link-only to link.", self.name));
+                return Err(anyhow!(
+                    "An existing Zenodo Deposition with the title \
+                                   '{}' was found. Use --link-only to link.",
+                    self.name
+                ));
             }
             existing_info
         } else {
@@ -331,7 +385,6 @@ impl ZenodoAPI {
         Ok(())
     }
 
-
     // Check if file exists, returning None if not,
     // and the ZenodoFile if so
     // TODO: could be part of higher Remote API, e.g. through generics?
@@ -341,26 +394,38 @@ impl ZenodoAPI {
     }
 
     pub fn get_deposition_id(&self) -> Result<u64> {
-        self.deposition_id.ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))
+        self.deposition_id
+            .ok_or(anyhow!("Internal Error: Zenodo deposition_id not set."))
     }
 
     pub async fn delete_article_file(&self, file: &ZenodoFile) -> Result<()> {
         let id = self.get_deposition_id()?;
         let file_id = &file.id;
         let url = format!("{}/{}/files/{}", "/deposit/depositions", id, file_id);
-        self.issue_request::<HashMap<String,String>>(Method::DELETE, &url, None, None).await?;
-        info!("deleted Zenodo file '{}' (File ID={})", file.filename, file_id);
+        self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None, None)
+            .await?;
+        info!(
+            "deleted Zenodo file '{}' (File ID={})",
+            file.filename, file_id
+        );
         Ok(())
     }
-
 
     // Upload the file, deleting any existing files if overwrite is true.
     //
     // Returns true/false if upload was completed or not. Will Error in other cases.
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
+    pub async fn upload(
+        &self,
+        data_file: &DataFile,
+        path_context: &Path,
+        overwrite: bool,
+    ) -> Result<bool> {
         // (1) First, let's make sure that data_file isn't empty
         if data_file.size == 0 {
-            return Err(anyhow!("ZenodoAPI::upload() was called to upload an empty file: '{:?}'", data_file.full_path(path_context)?))
+            return Err(anyhow!(
+                "ZenodoAPI::upload() was called to upload an empty file: '{:?}'",
+                data_file.full_path(path_context)?
+            ));
         }
 
         // (2) Get local file info
@@ -369,7 +434,9 @@ impl ZenodoAPI {
         let file_size = data_file.size;
 
         // (3) Find the bucket url.
-        let bucket_url = self.bucket_url.as_ref().ok_or(anyhow!("Internal Error: Zenodo bucket_url not set. Please report."))?;
+        let bucket_url = self.bucket_url.as_ref().ok_or(anyhow!(
+            "Internal Error: Zenodo bucket_url not set. Please report."
+        ))?;
 
         // (4) Let's check if the file exists on the remote
         let existing_file = self.file_exists(&name).await?;
@@ -378,47 +445,74 @@ impl ZenodoAPI {
         // (5) handle deleting files first if a file exists and overwrite is true
         if let Some(file) = existing_file {
             if !overwrite {
-                print_info!("Zenodo::upload() found file '{}' in Zenodo \
+                print_info!(
+                    "Zenodo::upload() found file '{}' in Zenodo \
                             Deposition ID={}. Since overwrite=false, 
                             this file will not be deleted and re-uploaded.",
-                            name, id);
+                    name,
+                    id
+                );
                 return Ok(false);
             } else {
-                info!("FigShare::upload() is deleting file '{}' since \
-                      overwrite=true.", name);
+                info!(
+                    "FigShare::upload() is deleting file '{}' since \
+                      overwrite=true.",
+                    name
+                );
                 self.delete_article_file(&file).await?;
-            } 
-        } 
+            }
+        }
 
-        // (6) Build the headers -- note the content-length header is very important; 
+        // (6) Build the headers -- note the content-length header is very important;
         // if not present, Zenodo will return "File is smaller than expected". reqwest
         // oddly attaches a wrong content-length header silently
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
-        headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&file_size.to_string()).unwrap());
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
+        headers.insert(
+            CONTENT_LENGTH,
+            HeaderValue::from_str(&file_size.to_string()).unwrap(),
+        );
 
         // (7) we need to take the Zenodo bucket_url, remove the base since
         // issue_request adds it
         let bucket_endpoint = remove_base_url(bucket_url)?;
         let bucket_endpoint = format!("{}/{}", bucket_endpoint, name);
 
-
         // (8) Prepare the file upload
         let file = tokio::fs::File::open(full_path).await?;
-        let response = self.issue_request::<HashMap<String, String>>(Method::PUT, &bucket_endpoint, 
-                                                                     Some(headers), Some(RequestData::Stream(file))).await?;
+        let response = self
+            .issue_request::<HashMap<String, String>>(
+                Method::PUT,
+                &bucket_endpoint,
+                Some(headers),
+                Some(RequestData::Stream(file)),
+            )
+            .await?;
         let info: ZenodoFileUpload = response.json().await?;
 
         // (9) After upload, compare the remote and local MD5s
-        let err_msg = format!("ZenodoAPI error: Zenodo did not provide a checksum that starts with 'md5:'\n\
-                              Please file an issue at: {}", ISSUE_URL);
-        let remote_md5 = info.checksum.strip_prefix("md5:").expect(&err_msg).to_owned();
+        let err_msg = format!(
+            "ZenodoAPI error: Zenodo did not provide a checksum that starts with 'md5:'\n\
+                              Please file an issue at: {}",
+            ISSUE_URL
+        );
+        let remote_md5 = info
+            .checksum
+            .strip_prefix("md5:")
+            .expect(&err_msg)
+            .to_owned();
         let local_md5 = data_file.md5.clone();
 
-        let msg = format!("After upload, the local ({}) and remote ({}) MD5s differed.\n\
-                          SciDataFlow automatically deletes the remote file in this case. \n", 
-                          shorten(&local_md5, Some(8)), shorten(&remote_md5, Some(8)));
- 
+        let msg = format!(
+            "After upload, the local ({}) and remote ({}) MD5s differed.\n\
+                          SciDataFlow automatically deletes the remote file in this case. \n",
+            shorten(&local_md5, Some(8)),
+            shorten(&remote_md5, Some(8))
+        );
+
         // (10) Handle MD5 mismatch, deleting the remote file if they don't agree.
         // NOTE: this is not tested -- see note at test_upload()
         if remote_md5 != local_md5 {
@@ -426,17 +520,19 @@ impl ZenodoAPI {
             match zenodo_file {
                 None => {
                     // The MD5s disagree, but when we try to get the file, we also cannot
-                    // find it. This is an extreme corner case, likely due to issues on 
+                    // find it. This is an extreme corner case, likely due to issues on
                     // Zenodo's end
                     Err(anyhow!("{}However, in trying this, the remote file could not be found. This \n\
                                 very likely reflects an internal error on Zenodo's end. Please log \n\
                                 into Zenodo.org and manaually delete the file (if it exists) and \n\
                                 try re-uploading.", msg))
-                },
+                }
                 Some(file) => {
-                    self.delete_article_file(&file).await
-                        .context(format!("{}. However, SciDataFlow encountered an error while \
-                                         trying to delete the file.", msg))?;
+                    self.delete_article_file(&file).await.context(format!(
+                        "{}. However, SciDataFlow encountered an error while \
+                                         trying to delete the file.",
+                        msg
+                    ))?;
                     Ok(false)
                 }
             }
@@ -449,22 +545,24 @@ impl ZenodoAPI {
     pub async fn get_files(&self) -> Result<Vec<ZenodoFile>> {
         let id = self.get_deposition_id()?;
         let url = format!("{}/{}/files", "/deposit/depositions", id);
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, &url, None, None).await?;
+        let response = self
+            .issue_request::<HashMap<String, String>>(Method::GET, &url, None, None)
+            .await?;
         let files: Vec<ZenodoFile> = response.json().await?;
         Ok(files)
     }
 
     pub async fn get_remote_files(&self) -> Result<Vec<RemoteFile>> {
         let articles = self.get_files().await?;
-        let remote_files:Vec<RemoteFile> = articles.into_iter().map(RemoteFile::from).collect();
+        let remote_files: Vec<RemoteFile> = articles.into_iter().map(RemoteFile::from).collect();
         Ok(remote_files)
     }
 
     // Get all files from a Zenodo Deposition, in a HashMap
     // with file name as keys.
-    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,ZenodoFile>> {
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String, ZenodoFile>> {
         let mut files: Vec<ZenodoFile> = self.get_files().await?;
-        let mut files_hash: HashMap<String,ZenodoFile> = HashMap::new();
+        let mut files_hash: HashMap<String, ZenodoFile> = HashMap::new();
         for file in files.iter_mut() {
             files_hash.insert(file.filename.clone(), file.clone());
         }
@@ -479,9 +577,9 @@ impl ZenodoAPI {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logging_setup::setup;
     use httpmock::prelude::*;
     use serde_json::json;
-    use crate::logging_setup::setup;
     use std::io::Write;
 
     #[tokio::test]
@@ -499,74 +597,72 @@ mod tests {
             title: Some("A *truly* reproducible project.".to_string()),
             email: None,
             affiliation: Some("UC Berkeley".to_string()),
-            description: Some("Let's build infrastructure so science can build off itself.".to_string()),
+            description: Some(
+                "Let's build infrastructure so science can build off itself.".to_string(),
+            ),
         };
 
         // Create a mock deposition endpoint with a simulated success response
         let deposition_get_mock = server.mock(|when, then| {
-            when.method(GET)
-                .path("/deposit/depositions");
-            then.status(200)
-                .json_body(json!([]));
+            when.method(GET).path("/deposit/depositions");
+            then.status(200).json_body(json!([]));
         });
 
         // Create a mock deposition endpoint with a simulated success response
         let deposition_mock = server.mock(|when, then| {
-            when.method(POST)
-                .path("/deposit/depositions");
+            when.method(POST).path("/deposit/depositions");
             // TODO probably could minimize this example
-            then.status(200)
-                .json_body(json!({
-                    "conceptrecid": "8266447",
-                    "created": "2023-08-20T01:31:12.406094+00:00",
+            then.status(200).json_body(json!({
+                "conceptrecid": "8266447",
+                "created": "2023-08-20T01:31:12.406094+00:00",
+                "doi": "",
+                "doi_url": "https://doi.org/",
+                "files": [],
+                "id": expected_id,
+                "links": {
+                    "bucket": expected_bucket_url,
+                    "discard": "https://zenodo.org/api/deposit/depositions/8266448/actions/discard",
+                    "edit": "https://zenodo.org/api/deposit/depositions/8266448/actions/edit",
+                    "files": "https://zenodo.org/api/deposit/depositions/8266448/files",
+                    "html": "https://zenodo.org/deposit/8266448",
+                    "latest_draft": "https://zenodo.org/api/deposit/depositions/8266448",
+                    "latest_draft_html": "https://zenodo.org/deposit/8266448",
+                    "publish": "https://zenodo.org/api/deposit/depositions/8266448/actions/publish",
+                    "self": "https://zenodo.org/api/deposit/depositions/8266448"
+                },
+                "metadata": {
+                    "access_right": "open",
+                    "creators": [
+                    {
+                        "affiliation": local_metadata.affiliation,
+                        "name": local_metadata.author_name,
+                    }
+                    ],
+                    "description": "This is a description of my deposition",
                     "doi": "",
-                    "doi_url": "https://doi.org/",
-                    "files": [],
-                    "id": expected_id,
-                    "links": {
-                        "bucket": expected_bucket_url,
-                        "discard": "https://zenodo.org/api/deposit/depositions/8266448/actions/discard",
-                        "edit": "https://zenodo.org/api/deposit/depositions/8266448/actions/edit",
-                        "files": "https://zenodo.org/api/deposit/depositions/8266448/files",
-                        "html": "https://zenodo.org/deposit/8266448",
-                        "latest_draft": "https://zenodo.org/api/deposit/depositions/8266448",
-                        "latest_draft_html": "https://zenodo.org/deposit/8266448",
-                        "publish": "https://zenodo.org/api/deposit/depositions/8266448/actions/publish",
-                        "self": "https://zenodo.org/api/deposit/depositions/8266448"
+                    "license": "CC-BY-4.0",
+                    "prereserve_doi": {
+                        "doi": "10.5281/zenodo.8266448",
+                        "recid": 8266448
                     },
-                    "metadata": {
-                        "access_right": "open",
-                        "creators": [
-                        {
-                            "affiliation": local_metadata.affiliation,
-                            "name": local_metadata.author_name,
-                        }
-                        ],
-                        "description": "This is a description of my deposition",
-                        "doi": "",
-                        "license": "CC-BY-4.0",
-                        "prereserve_doi": {
-                            "doi": "10.5281/zenodo.8266448",
-                            "recid": 8266448
-                        },
-                        "publication_date": "2023-08-20",
-                        "title": "My Deposition Title",
-                        "upload_type": "poster"
-                    },
-                    "modified": "2023-08-20T01:31:12.406103+00:00",
-                    "owner": 110965,
-                    "record_id": 8266448,
-                    "state": "unsubmitted",
-                    "submitted": false,
-                    "title": "My Deposition Title"
-                }));
+                    "publication_date": "2023-08-20",
+                    "title": "My Deposition Title",
+                    "upload_type": "poster"
+                },
+                "modified": "2023-08-20T01:31:12.406103+00:00",
+                "owner": 110965,
+                "record_id": 8266448,
+                "state": "unsubmitted",
+                "submitted": false,
+                "title": "My Deposition Title"
+            }));
         });
 
         // Create an instance of ZenodoAPI
         let mut api = ZenodoAPI::new("test", Some(server.url("/"))).unwrap();
 
         // Main call to test
-        let _result = api.remote_init(local_metadata,false).await;
+        let _result = api.remote_init(local_metadata, false).await;
         //info!("result: {:?}", result);
 
         // ensure the specified mocks were called exactly one time (or fail).
@@ -589,7 +685,7 @@ mod tests {
             filename: "fake_data.tsv".to_string(),
             id: "56789".to_string(),
             links: ZenodoLinks::default(),
-            filesize: 11
+            filesize: 11,
         };
 
         let expected_deposition_id = 1234564;
@@ -597,8 +693,10 @@ mod tests {
         // Mock for delete_article_file
         let delete_file_mock = server.mock(|when, then| {
             when.method(DELETE)
-                .path(format!("/deposit/depositions/{}/files/{}", 
-                              expected_deposition_id, file.id))
+                .path(format!(
+                    "/deposit/depositions/{}/files/{}",
+                    expected_deposition_id, file.id
+                ))
                 .query_param("access_token", TEST_TOKEN);
             then.status(200); // Assuming a successful deletion returns a 200 status code
         });
@@ -612,18 +710,28 @@ mod tests {
         let result = api.delete_article_file(&file).await;
 
         // Assert that the result is OK
-        assert!(result.is_ok(), "Err encountered in Zenodo::delete_article_file(): {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Err encountered in Zenodo::delete_article_file(): {:?}",
+            result
+        );
 
         // Ensure the specified mock was called exactly once
         delete_file_mock.assert();
     }
 
-    fn setup_get_files_mock<'a>(server: &'a MockServer, expected_deposition_id: u64,
-                                  remote_files: &'a Vec<ZenodoFile>) -> httpmock::Mock<'a> {
+    fn setup_get_files_mock<'a>(
+        server: &'a MockServer,
+        expected_deposition_id: u64,
+        remote_files: &'a Vec<ZenodoFile>,
+    ) -> httpmock::Mock<'a> {
         debug!("Setting up get_files mock");
         server.mock(|when, then| {
             when.method(GET)
-                .path(format!("/deposit/depositions/{}/files", expected_deposition_id))
+                .path(format!(
+                    "/deposit/depositions/{}/files",
+                    expected_deposition_id
+                ))
                 .query_param("access_token", TEST_TOKEN);
             then.status(200)
                 // return the files found, which depends on params of test
@@ -631,9 +739,12 @@ mod tests {
         })
     }
 
-
-    fn setup_upload_file_mock<'a>(server: &'a MockServer, bucket_endpoint: &'a str, 
-                                  md5: &'a str, size: usize) -> httpmock::Mock<'a> {
+    fn setup_upload_file_mock<'a>(
+        server: &'a MockServer,
+        bucket_endpoint: &'a str,
+        md5: &'a str,
+        size: usize,
+    ) -> httpmock::Mock<'a> {
         debug!("Setting up upload_file mock");
         //let md5 = if !wrong_md5 { md5.to_owned() } else { md5.clone().chars().rev().collect::<String>() };
         let remote_md5 = format!("md5:{}", md5);
@@ -661,24 +772,29 @@ mod tests {
         })
     }
 
-    fn setup_delete_file_mock<'a>(server: &'a MockServer, zenodo_file: &'a ZenodoFile, 
-                             expected_deposition_id: u64) -> httpmock::Mock<'a> {
+    fn setup_delete_file_mock<'a>(
+        server: &'a MockServer,
+        zenodo_file: &'a ZenodoFile,
+        expected_deposition_id: u64,
+    ) -> httpmock::Mock<'a> {
         debug!("Setting up delete_file mock");
         server.mock(|when, then| {
             let expected_file_id = &zenodo_file.id;
             when.method(DELETE)
-                .path(format!("/deposit/depositions/{}/files/{}", expected_deposition_id, expected_file_id))
+                .path(format!(
+                    "/deposit/depositions/{}/files/{}",
+                    expected_deposition_id, expected_file_id
+                ))
                 .query_param("access_token", TEST_TOKEN);
             then.status(204); // Typically, HTTP status 204 indicates that the server successfully processed the request and is not returning any content.
         })
     }
 
-
     // Main Test Function
     //
     // Note: this does *not* test wrong MD5s. It should, but this will require refactoring
-    // things quite a bit. The issue is that the vector remote_files will need to change 
-    // mid-call to ZenodoAPI::upload(), since the file was uploaded but has wrong MD5, 
+    // things quite a bit. The issue is that the vector remote_files will need to change
+    // mid-call to ZenodoAPI::upload(), since the file was uploaded but has wrong MD5,
     // and the upload() method then retrieves it
     async fn test_upload(file_exists: bool, overwrite: bool) -> Result<bool> {
         setup();
@@ -701,7 +817,7 @@ mod tests {
             tracked: true,
             md5: md5.to_string(),
             size,
-            url: None
+            url: None,
         };
 
         let path_context = Path::new("path/to/datafile");
@@ -712,11 +828,11 @@ mod tests {
         // Mock for the get_files method
         let mut remote_files = Vec::new();
         let zenodo_file = ZenodoFile {
-            checksum: md5.clone().to_string(),
+            checksum: md5.to_string(),
             filename: data_file.basename()?,
             filesize: size as usize,
             id: "4242".to_string(),
-            links: ZenodoLinks::default()
+            links: ZenodoLinks::default(),
         };
 
         // Create a mock with the remote file there if we're testing this case.
@@ -729,11 +845,16 @@ mod tests {
 
         // Mock for the upload method
         // NOTE: this mock does not test for binary files
-        let upload_file_mock = setup_upload_file_mock(&server, &bucket_endpoint, &md5, size as usize);
+        let upload_file_mock =
+            setup_upload_file_mock(&server, &bucket_endpoint, &md5, size as usize);
 
         // Mock for the delete_article_file method
         let delete_file_mock = if file_exists && overwrite {
-            Some(setup_delete_file_mock(&server, &zenodo_file, expected_deposition_id))
+            Some(setup_delete_file_mock(
+                &server,
+                &zenodo_file,
+                expected_deposition_id,
+            ))
         } else {
             None
         };
@@ -746,7 +867,7 @@ mod tests {
         // Main call to test
         let result = api.upload(&data_file, &path_context, overwrite).await;
 
-        //println!("get_files_mock={:}?, upload_file_mock={:?}, delete_file_mock={:?}", 
+        //println!("get_files_mock={:}?, upload_file_mock={:?}, delete_file_mock={:?}",
         //         get_files_mock.hits(), upload_file_mock.hits(), delete_file_mock.unwrap().hits());
 
         // Ensure the specified mocks were called exactly one time (or fail).
@@ -759,14 +880,17 @@ mod tests {
         if file_exists && overwrite {
             delete_file_mock.unwrap().assert();
         }
-        return result
+        return result;
     }
 
     #[tokio::test]
     async fn test_upload_no_overwrite_no_remote_files() -> Result<()> {
         let result = test_upload(false, false).await?;
-        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}0. Result: {:?}", 
-                false, false, result);
+        assert!(
+            result,
+            "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}0. Result: {:?}",
+            false, false, result
+        );
         Ok(())
     }
 
@@ -774,17 +898,22 @@ mod tests {
     async fn test_upload_no_overwrite_with_remote_files() -> Result<()> {
         let result = test_upload(true, false).await?;
         // result should return false since no upload was done.
-        assert!(!result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
-                true, false, result);
+        assert!(
+            !result,
+            "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}",
+            true, false, result
+        );
         Ok(())
     }
 
     #[tokio::test]
     async fn test_upload_overwrite_with_remote_files() -> Result<()> {
         let result = test_upload(true, true).await?;
-        assert!(result, "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}", 
-                true, true, result);
+        assert!(
+            result,
+            "Zenodo::upload() failed (file_exists={:?}, overwrite={:?}). Result: {:?}",
+            true, true, result
+        );
         Ok(())
     }
 }
-

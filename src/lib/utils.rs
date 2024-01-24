@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use anyhow::{anyhow, Result};
+use chrono::{Local, Utc};
+use colored::*;
+#[allow(unused_imports)]
+use log::{debug, info, trace};
+use md5::Context;
 use std::collections::BTreeMap;
-use anyhow::{anyhow,Result};
-use chrono::{Utc,Local};
-use timeago::Formatter;
-use std::path::{Path,PathBuf};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use md5::Context;
-#[allow(unused_imports)]
-use log::{info, trace, debug};
-use colored::*;
+use std::path::{Path, PathBuf};
+use timeago::Formatter;
 
 use crate::lib::data::StatusEntry;
 use crate::lib::remote::Remote;
@@ -19,7 +19,8 @@ pub const ISSUE_URL: &str = "https://github.com/vsbuffalo/scidataflow/issues";
 pub fn load_file(path: &PathBuf) -> String {
     let mut file = File::open(path).expect("unable to open file");
     let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("unable to read file");
+    file.read_to_string(&mut contents)
+        .expect("unable to read file");
     contents
 }
 
@@ -28,7 +29,10 @@ pub fn ensure_directory(dir: &Path) -> Result<()> {
     if path.is_dir() {
         Ok(())
     } else {
-        Err(anyhow!("'{}' is not a directory or doesn't exist.", dir.to_string_lossy()))
+        Err(anyhow!(
+            "'{}' is not a directory or doesn't exist.",
+            dir.to_string_lossy()
+        ))
     }
 }
 
@@ -120,17 +124,23 @@ println!();
 }
 */
 // More specialized version of print_fixed_width() for statuses.
-// Handles coloring, manual annotation, etc 
-pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspaces: Option<usize>, 
-                                indent: Option<usize>, color: bool, all: bool) {
+// Handles coloring, manual annotation, etc
+pub fn print_fixed_width_status(
+    rows: BTreeMap<String, Vec<StatusEntry>>,
+    nspaces: Option<usize>,
+    indent: Option<usize>,
+    color: bool,
+    all: bool,
+) {
     //debug!("rows: {:?}", rows);
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
 
     let abbrev = Some(8);
 
-    // get the max number of columns (in case ragged) 
-    let max_cols = rows.values()
+    // get the max number of columns (in case ragged)
+    let max_cols = rows
+        .values()
         .flat_map(|v| v.iter())
         .map(|entry| entry.columns(abbrev).len())
         .max()
@@ -140,7 +150,7 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
 
     // compute max lengths across all rows
     for status in rows.values().flat_map(|v| v.iter()) {
-        let cols = status.columns(abbrev); 
+        let cols = status.columns(abbrev);
         for (i, col) in cols.iter().enumerate() {
             max_lengths[i] = max_lengths[i].max(col.len()); // Assuming col is a string
         }
@@ -152,7 +162,11 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
     for key in dir_keys {
         let statuses = &rows[key];
         let pretty_key = if key.is_empty() { "." } else { key };
-        let prettier_key = if color { pretty_key.bold().to_string() } else { pretty_key.clone().to_string() };
+        let prettier_key = if color {
+            pretty_key.bold().to_string()
+        } else {
+            pretty_key.to_string()
+        };
         println!("[{}]", prettier_key);
 
         // Print the rows with the correct widths
@@ -171,7 +185,11 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
             }
             let spacer = " ".repeat(nspaces);
             let line = fixed_row.join(&spacer);
-            let status_line = if color { status.color(line) } else { line.to_string() };
+            let status_line = if color {
+                status.color(line)
+            } else {
+                line.to_string()
+            };
             println!("{}{}", " ".repeat(indent), status_line);
         }
         println!();
@@ -179,22 +197,22 @@ pub fn print_fixed_width_status(rows: BTreeMap<String, Vec<StatusEntry>>, nspace
 }
 
 /* fn organize_by_dir(rows: Vec<StatusEntry>) -> BTreeMap<String, Vec<StatusEntry>> {
-   let mut dir_map: BTreeMap<String, Vec<StatusEntry>> = BTreeMap::new();
+let mut dir_map: BTreeMap<String, Vec<StatusEntry>> = BTreeMap::new();
 
-   for entry in rows {
-   if let Some(cols) = &entry.cols {
-   if let Some(first_elem) = cols.first() {
-   let path = Path::new(first_elem);
-   if let Some(parent_path) = path.parent() {
-   let parent_dir = parent_path.to_string_lossy().into_owned();
-   dir_map.entry(parent_dir).or_default().push(entry);
-   }
-   }
-   }
-   }
-   dir_map
-   }
-   */
+for entry in rows {
+if let Some(cols) = &entry.cols {
+if let Some(first_elem) = cols.first() {
+let path = Path::new(first_elem);
+if let Some(parent_path) = path.parent() {
+let parent_dir = parent_path.to_string_lossy().into_owned();
+dir_map.entry(parent_dir).or_default().push(entry);
+}
+}
+}
+}
+dir_map
+}
+*/
 
 pub fn pluralize<T: Into<u64>>(count: T, noun: &str) -> String {
     let count = count.into();
@@ -211,10 +229,10 @@ struct FileCounts {
     both: u64,
     total: u64,
     #[allow(dead_code)]
-    messy: u64
+    messy: u64,
 }
 
-fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
+fn get_counts(rows: &BTreeMap<String, Vec<StatusEntry>>) -> Result<FileCounts> {
     let mut local = 0;
     let mut remote = 0;
     let mut both = 0;
@@ -223,56 +241,67 @@ fn get_counts(rows: &BTreeMap<String,Vec<StatusEntry>>) -> Result<FileCounts> {
     for files in rows.values() {
         for file in files {
             total += 1;
-           match (&file.local_status, &file.remote_status, &file.tracked) {
+            match (&file.local_status, &file.remote_status, &file.tracked) {
                 (None, None, _) => {
                     return Err(anyhow!("Internal Error: get_counts found a file with both local/remote set to None."));
-                },
+                }
                 (None, Some(_), None) => {
                     remote += 1;
-                },
+                }
                 (Some(_), None, Some(false)) => {
                     local += 1;
-                }, 
+                }
                 (Some(_), None, None) => {
                     local += 1;
-                }, 
+                }
                 (None, Some(_), Some(true)) => {
                     remote += 1;
-                },
+                }
                 (None, Some(_), Some(false)) => {
                     local += 1;
-                },
+                }
                 (Some(_), Some(_), Some(true)) => {
                     both += 1;
-                },
+                }
                 (Some(_), Some(_), Some(false)) => {
                     messy += 1;
-                },
+                }
                 (Some(_), None, Some(true)) => {
                     remote += 1;
-                },
+                }
                 (Some(_), Some(_), None) => {
                     messy += 1;
                 }
             }
         }
     }
-    Ok(FileCounts { local, remote, both, total, messy })
+    Ok(FileCounts {
+        local,
+        remote,
+        both,
+        total,
+        messy,
+    })
 }
 
-pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&HashMap<String,Remote>>,
-                    all: bool) {
+pub fn print_status(
+    rows: BTreeMap<String, Vec<StatusEntry>>,
+    remote: Option<&HashMap<String, Remote>>,
+    all: bool,
+) {
     println!("{}", "Project data status:".bold());
     let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
-    println!("{} local and tracked by a remote ({} only local, {} only remote), {} total.\n", 
-             pluralize(counts.both, "file"),
-             pluralize(counts.local, "file"),
-             pluralize(counts.remote, "file"),
-             //pluralize(counts.messy as u64, "file"),
-             pluralize(counts.total, "file"));
+    println!(
+        "{} local and tracked by a remote ({} only local, {} only remote), {} total.\n",
+        pluralize(counts.both, "file"),
+        pluralize(counts.local, "file"),
+        pluralize(counts.remote, "file"),
+        //pluralize(counts.messy as u64, "file"),
+        pluralize(counts.total, "file")
+    );
 
-    // this brings the remote name (if there is a corresponding remote) into 
-    // the key, so the linked remote can be displayed in the status 
+    // this brings the remote name (if there is a corresponding remote) into
+    // the key, so the linked remote can be displayed in the status
     let rows_by_dir: BTreeMap<String, Vec<StatusEntry>> = match remote {
         Some(remote_map) => {
             let mut new_map = BTreeMap::new();
@@ -285,7 +314,7 @@ pub fn print_status(rows: BTreeMap<String,Vec<StatusEntry>>, remote: Option<&Has
                 }
             }
             new_map
-        },
+        }
         None => rows,
     };
 
@@ -313,16 +342,12 @@ pub fn format_bytes(size: u64) -> String {
     }
 }
 
-
 pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     let now = Utc::now();
     let duration_since_mod = now.signed_duration_since(mod_time);
 
     // convert chrono::Duration to std::time::Duration
-    let std_duration = std::time::Duration::new(
-        duration_since_mod.num_seconds() as u64,
-        0
-        );
+    let std_duration = std::time::Duration::new(duration_since_mod.num_seconds() as u64, 0);
 
     let formatter = Formatter::new();
     let local_time = mod_time.with_timezone(&Local);
@@ -335,7 +360,11 @@ pub fn shorten(hash: &String, abbrev: Option<i32>) -> String {
     hash.chars().take(n).collect()
 }
 
-pub fn md5_status(new_md5: Option<&String>, old_md5: Option<&String>, abbrev: Option<i32>) -> String {
+pub fn md5_status(
+    new_md5: Option<&String>,
+    old_md5: Option<&String>,
+    abbrev: Option<i32>,
+) -> String {
     match (new_md5, old_md5) {
         (Some(new), Some(old)) => {
             if new == old {
@@ -343,9 +372,8 @@ pub fn md5_status(new_md5: Option<&String>, old_md5: Option<&String>, abbrev: Op
             } else {
                 format!("{} → {}", shorten(old, abbrev), shorten(new, abbrev))
             }
-        },
+        }
         (None, Some(old)) => shorten(old, abbrev),
         _ => "".to_string(),
     }
 }
-

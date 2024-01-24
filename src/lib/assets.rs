@@ -10,7 +10,10 @@ impl GitHubRepo {
     /// Create a new GitHubRepo from a URL string
     pub fn new(url_str: &str) -> Result<Self, String> {
         let parsed_url = Url::parse(url_str).map_err(|e| e.to_string())?;
-        let path_segments: Vec<&str> = parsed_url.path_segments().ok_or("Invalid path".to_string())?.collect();
+        let path_segments: Vec<&str> = parsed_url
+            .path_segments()
+            .ok_or("Invalid path".to_string())?
+            .collect();
 
         if path_segments.len() < 2 {
             return Err("URL should contain both username and repository".to_string());

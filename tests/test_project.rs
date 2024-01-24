@@ -1,20 +1,19 @@
 #[allow(unused_imports)]
-use log::{info, trace, debug};
+use log::{debug, info, trace};
 
 mod common;
-use common::{setup,get_statuses,generate_random_tsv};
-
+use common::{generate_random_tsv, get_statuses, setup};
 
 #[cfg(test)]
 mod tests {
-    use log::info;
     use crate::common::get_statuses_map;
+    use log::info;
 
-    use super::setup;
-    use super::get_statuses;
     use super::generate_random_tsv;
-    use std::path::PathBuf;
+    use super::get_statuses;
+    use super::setup;
     use scidataflow::lib::data::LocalStatusCode;
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_fixture() {
@@ -34,7 +33,10 @@ mod tests {
         // test that init() creates the data manifest
         let data_manifest = fixture.env.get_file_path("data_manifest.yml");
         info!("Checking for file at path: {}", data_manifest.display()); // Add this log
-        assert!(data_manifest.exists(), "Project::init() did not create 'data_manifest.yml'");
+        assert!(
+            data_manifest.exists(),
+            "Project::init() did not create 'data_manifest.yml'"
+        );
     }
 
     #[tokio::test]
@@ -48,7 +50,8 @@ mod tests {
 
         // get the files to add
         let files = &fixture.env.files.as_ref().unwrap();
-        let add_files: Vec<String> = files.into_iter()
+        let add_files: Vec<String> = files
+            .into_iter()
             .filter(|f| f.add)
             .map(|f| f.path.clone())
             .collect();
@@ -64,13 +67,26 @@ mod tests {
         for (full_path, status) in statuses {
             if add_files.contains(&full_path.to_string_lossy().to_string()) {
                 // check that the status is current
-                assert!(status.local_status.is_some(), "File '{:?}' does not have a local status", full_path);
+                assert!(
+                    status.local_status.is_some(),
+                    "File '{:?}' does not have a local status",
+                    full_path
+                );
                 if let Some(local_status) = &status.local_status {
-                    assert_eq!(*local_status, LocalStatusCode::Current, "Added file '{:?}' does not have 'Current' status", full_path);
+                    assert_eq!(
+                        *local_status,
+                        LocalStatusCode::Current,
+                        "Added file '{:?}' does not have 'Current' status",
+                        full_path
+                    );
                 }
             } else {
                 // check that the status is None (not registered)
-                assert!(status.local_status.is_none(), "File '{:?}' should not have a local status", full_path);
+                assert!(
+                    status.local_status.is_none(),
+                    "File '{:?}' should not have a local status",
+                    full_path
+                );
             }
         }
     }
@@ -92,7 +108,11 @@ mod tests {
 
         // Now, let's check the status is modified.
         let updated_statuses = get_statuses_map(&mut fixture, &path_context).await;
-        let updated_status_option = updated_statuses.get(&file_to_check).unwrap().local_status.clone();
+        let updated_status_option = updated_statuses
+            .get(&file_to_check)
+            .unwrap()
+            .local_status
+            .clone();
         let updated_status = updated_status_option.unwrap().clone();
         assert_eq!(updated_status, LocalStatusCode::Modified);
 
@@ -104,10 +124,14 @@ mod tests {
             let result = fixture.project.update(Some(&files)).await;
             assert!(result.is_ok(), "re-adding raised Error!");
         }
-        
+
         // and make sure the status goes back to current.
         let readd_statuses = get_statuses_map(&mut fixture, &path_context).await;
-        let readd_status_option = readd_statuses.get(&file_to_check).unwrap().local_status.clone();
+        let readd_status_option = readd_statuses
+            .get(&file_to_check)
+            .unwrap()
+            .local_status
+            .clone();
         let readd_status = readd_status_option.unwrap().clone();
         assert_eq!(readd_status, LocalStatusCode::Current);
     }
@@ -122,19 +146,18 @@ mod tests {
                 file_list.push(file.path.clone());
                 let result = fixture.project.add(&file_list).await;
 
-                // check that we get 
+                // check that we get
                 match result {
                     Ok(_) => assert!(false, "Expected an error, but got Ok"),
                     Err(err) => {
-                        assert!(err.to_string().contains("already registered"),
-                        "Unexpected error: {:?}", err);
+                        assert!(
+                            err.to_string().contains("already registered"),
+                            "Unexpected error: {:?}",
+                            err
+                        );
                     }
                 };
-
             }
         }
     }
-
-
 }
-

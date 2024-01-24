@@ -1,13 +1,12 @@
 use std::path::Path;
 
+use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
-use anyhow::{Result, anyhow};
 #[allow(unused_imports)]
-use log::{info, trace, debug};
+use log::{debug, info, trace};
 use scidataflow::lib::assets::GitHubRepo;
 use scidataflow::lib::download::Downloads;
 use tokio::runtime::Builder;
-
 
 use scidataflow::lib::project::Project;
 use scidataflow::logging_setup::setup;
@@ -60,7 +59,6 @@ Please submit bugs or feature requests to:
 https://github.com/vsbuffalo/scidataflow/issues.
 ";
 
-
 #[derive(Parser)]
 #[clap(name = "sdf")]
 #[clap(about = INFO)]
@@ -80,7 +78,7 @@ enum Commands {
         #[arg(required = true)]
         filenames: Vec<String>,
     },
-    /// Set local system-wide metadata (e.g. your name, email, etc.), which 
+    /// Set local system-wide metadata (e.g. your name, email, etc.), which
     /// can be propagated to some APIs.
     Config {
         /// Your name.
@@ -97,7 +95,7 @@ enum Commands {
     Init {
         /// Project name (default: the name of the directory).
         #[arg(long)]
-        name: Option<String>
+        name: Option<String>,
     },
     /// Download a file from a URL.
     Get {
@@ -107,7 +105,7 @@ enum Commands {
         name: Option<String>,
         /// Overwrite local files if they exit.
         #[arg(long)]
-        overwrite: bool
+        overwrite: bool,
     },
     /// Download a bunch of files from links stored in a file.
     Bulk {
@@ -127,16 +125,14 @@ enum Commands {
     Status {
         /// Show remotes status (requires network).
         #[arg(long)]
-        remotes: bool, 
+        remotes: bool,
 
         /// Show statuses of all files, including those on remote(s) but not in the manifest.
         #[arg(long)]
-        all: bool
-
+        all: bool,
     },
     /// Show file size statistics.
-    Stats {
-    },
+    Stats {},
     /// Update MD5s
     Update {
         /// Which file to update (if not set, all tracked files are update).
@@ -144,7 +140,7 @@ enum Commands {
         filenames: Vec<String>,
         /// Update all files presently registered in the manifest.
         #[arg(long)]
-        all: bool
+        all: bool,
     },
     /// Remove a file from the manifest
     Rm {
@@ -161,7 +157,7 @@ enum Commands {
         #[arg(long)]
         url: Option<String>,
         /// A SciDataFlow Asset name
-        asset: Option<String>
+        asset: Option<String>,
     },
     /// Link a directory to a remote storage solution.
     Link {
@@ -171,7 +167,7 @@ enum Commands {
         service: String,
         /// The authentication token.
         key: String,
-        /// Project name for remote (default: the metadata title in the data 
+        /// Project name for remote (default: the metadata title in the data
         /// manifest, or if that's not set, the directory name).
         #[arg(long)]
         name: Option<String>,
@@ -180,24 +176,20 @@ enum Commands {
         /// the remote information (i.e. the FigShare Article ID or Zenodo
         /// Depository ID) to add to the manifest. Requires network.
         #[arg(long)]
-        link_only: bool
-
+        link_only: bool,
     },
     /// No longer keep track of this file on the remote.
     Untrack {
         /// The file to untrack with remote.
-        filename: String
+        filename: String,
     },
     /// Keep track of this file on the remote.
     Track {
         /// The file to track with remote.
-        filename: String
+        filename: String,
     },
     /// Move or rename a file on the file system and in the manifest.
-    Mv {
-        source: String,
-        destination: String
-    },
+    Mv { source: String, destination: String },
     /// Push all tracked files to remote.
     Push {
         /// Overwrite remote files if they exit.
@@ -219,7 +211,6 @@ enum Commands {
         /// Pull in files from remotes and URLs.
         #[arg(long)]
         all: bool,
-
         // multiple optional directories
         //directories: Vec<PathBuf>,
     },
@@ -236,7 +227,7 @@ enum Commands {
 
 pub fn print_errors(response: Result<()>) {
     match response {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(err) => eprintln!("Error: {}", err),
     }
 }
@@ -251,7 +242,6 @@ fn main() {
         .enable_all()
         .build()
         .unwrap();
-
 
     runtime.block_on(async {
         match run().await {
@@ -271,25 +261,34 @@ async fn run() -> Result<()> {
             let mut proj = Project::new()?;
             proj.add(filenames).await
         }
-        Some(Commands::Config { name, email, affiliation }) => {
-            Project::set_config(name, email, affiliation)
-        }
-        Some(Commands::Get { url, name, overwrite }) => {
+        Some(Commands::Config {
+            name,
+            email,
+            affiliation,
+        }) => Project::set_config(name, email, affiliation),
+        Some(Commands::Get {
+            url,
+            name,
+            overwrite,
+        }) => {
             let mut proj = Project::new()?;
             proj.get(url, name.as_deref(), *overwrite).await
         }
-        Some(Commands::Bulk { filename, column, header, overwrite }) => {
+        Some(Commands::Bulk {
+            filename,
+            column,
+            header,
+            overwrite,
+        }) => {
             let mut proj = Project::new()?;
             proj.bulk(filename, *column, *header, *overwrite).await
         }
-        Some(Commands::Init { name }) => {
-            Project::init(name.clone())
-        }
+        Some(Commands::Init { name }) => Project::init(name.clone()),
         Some(Commands::Status { remotes, all }) => {
             let mut proj = Project::new()?;
             proj.status(*remotes, *all).await
         }
-        Some(Commands::Stats {  }) => {
+        Some(Commands::Stats {}) => {
             //let proj = Project::new()?;
             //proj.stats()
             Ok(())
@@ -303,41 +302,50 @@ async fn run() -> Result<()> {
             if !*all && filenames.is_empty() {
                 return Err(anyhow!("Specify --all or one or more file to update."));
             }
-            let filepaths = if *all {
-                None
-            } else {
-                Some(filenames)
-            };
+            let filepaths = if *all { None } else { Some(filenames) };
             proj.update(filepaths).await
         }
-        Some(Commands::Link { dir, service, key, name, link_only }) => {
+        Some(Commands::Link {
+            dir,
+            service,
+            key,
+            name,
+            link_only,
+        }) => {
             let mut proj = Project::new()?;
             proj.link(dir, service, key, name, link_only).await
         }
         Some(Commands::Track { filename }) => {
             let mut proj = Project::new()?;
             proj.track(filename)
-        },
+        }
         Some(Commands::Untrack { filename }) => {
             let mut proj = Project::new()?;
             proj.untrack(filename)
-        },
-        Some(Commands::Mv { source, destination }) => {
+        }
+        Some(Commands::Mv {
+            source,
+            destination,
+        }) => {
             let mut proj = Project::new()?;
             proj.mv(source, destination).await
-        },
+        }
         Some(Commands::Push { overwrite }) => {
             let mut proj = Project::new()?;
             proj.push(*overwrite).await
-        },
-        Some(Commands::Pull { overwrite, urls, all }) => {
+        }
+        Some(Commands::Pull {
+            overwrite,
+            urls,
+            all,
+        }) => {
             let mut proj = Project::new()?;
             proj.pull(*overwrite, *urls, *all).await
-        },
+        }
         Some(Commands::Metadata { title, description }) => {
             let mut proj = Project::new()?;
             proj.set_metadata(title, description)
-        },
+        }
         Some(Commands::Asset { github, url, asset }) => {
             if Path::new("data_manifest.yml").exists() {
                 return Err(anyhow!("data_manifest.yml already exists in the current directory; delete it manually first to use sdf asset."));
@@ -345,31 +353,27 @@ async fn run() -> Result<()> {
             let msg = "Set either --github, --url, or specify an SciDataFlow Asset name.";
             let url = match (github, url, asset) {
                 (Some(gh), None, None) => {
-                    let gh = GitHubRepo::new(gh).map_err(|e| {
-                        anyhow!("GitHubRepo initialization failed: {}", e)
-                    })?;
+                    let gh = GitHubRepo::new(gh)
+                        .map_err(|e| anyhow!("GitHubRepo initialization failed: {}", e))?;
                     gh.url("data_manifest.yml")
-                },
+                }
                 (None, None, Some(asset)) => {
                     let url = format!("{}/{}", SDF_ASSET_URL, asset);
-                    let gh = GitHubRepo::new(&url).expect("Internal Error: invalid Asset URL; please report.");
+                    let gh = GitHubRepo::new(&url)
+                        .expect("Internal Error: invalid Asset URL; please report.");
                     gh.url("data_manifest.yml")
-                },
-                (None, Some(url), None) => {
-                    url.to_string()
-                },
-                _ => return Err(anyhow!(msg))
+                }
+                (None, Some(url), None) => url.to_string(),
+                _ => return Err(anyhow!(msg)),
             };
             let mut downloads = Downloads::new();
             downloads.add(url.clone(), None, false)?;
             downloads.retrieve(None, None, false).await?;
             Ok(())
-        },
+        }
         None => {
             println!("{}\n", INFO);
             std::process::exit(1);
         }
     }
-
-
 }

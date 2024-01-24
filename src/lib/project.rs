@@ -1,33 +1,32 @@
-use std::fs::{File,metadata,canonicalize,rename};
-use anyhow::{anyhow,Result,Context};
-use serde_yaml;
-use serde_derive::{Serialize,Deserialize};
-use std::env;
-use std::path::{Path,PathBuf};
-use std::io::{Read, Write};
-#[allow(unused_imports)]
-use log::{info, trace, debug};
+use anyhow::{anyhow, Context, Result};
 use csv::{ReaderBuilder, StringRecord};
 use dirs;
-
-use crate::lib::download::Downloads;
 #[allow(unused_imports)]
-use crate::{print_warn,print_info};
-use crate::lib::data::{DataFile,DataCollection};
-use crate::lib::utils::{load_file,print_status, pluralize};
-use crate::lib::remote::{AuthKeys,authenticate_remote};
-use crate::lib::remote::Remote;
+use log::{debug, info, trace};
+use serde_derive::{Deserialize, Serialize};
+use serde_yaml;
+use std::env;
+use std::fs::{canonicalize, metadata, rename, File};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
 use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::zenodo::ZenodoAPI;
 use crate::lib::data::LocalStatusCode;
+use crate::lib::data::{DataCollection, DataFile};
+use crate::lib::download::Downloads;
+use crate::lib::remote::Remote;
+use crate::lib::remote::{authenticate_remote, AuthKeys};
+use crate::lib::utils::{load_file, pluralize, print_status};
+#[allow(unused_imports)]
+use crate::{print_info, print_warn};
 
 const MANIFEST: &str = "data_manifest.yml";
-
 
 pub fn find_manifest(start_dir: Option<&PathBuf>, filename: &str) -> Option<PathBuf> {
     let mut current_dir = match start_dir {
         Some(dir) => dir.to_path_buf(),
-        None => env::current_dir().expect("Failed to get current directory")
+        None => env::current_dir().expect("Failed to get current directory"),
     };
 
     loop {
@@ -45,8 +44,8 @@ pub fn find_manifest(start_dir: Option<&PathBuf>, filename: &str) -> Option<Path
 }
 
 pub fn config_path() -> Result<PathBuf> {
-    let mut config_path: PathBuf = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Cannot load home directory!"))?;
+    let mut config_path: PathBuf =
+        dirs::home_dir().ok_or_else(|| anyhow!("Cannot load home directory!"))?;
     config_path.push(".scidataflow_config");
     Ok(config_path)
 }
@@ -58,12 +57,10 @@ pub struct User {
     pub affiliation: Option<String>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Config {
-    user: User
+    user: User,
 }
-
 
 // Metadata about *local* project
 //
@@ -77,7 +74,7 @@ pub struct LocalMetadata {
     pub email: Option<String>,
     pub affiliation: Option<String>,
     pub title: Option<String>,
-    pub description: Option<String>
+    pub description: Option<String>,
 }
 
 impl LocalMetadata {
@@ -87,7 +84,7 @@ impl LocalMetadata {
             email: project.config.user.email.clone(),
             affiliation: project.config.user.affiliation.clone(),
             title: project.data.metadata.title.clone(),
-            description: project.data.metadata.description.clone()
+            description: project.data.metadata.description.clone(),
         }
     }
 }
@@ -105,15 +102,19 @@ impl Project {
 
     pub fn load_config() -> Result<Config> {
         let config_path = config_path()?;
-        let mut file = File::open(&config_path)
-            .map_err(|_| anyhow!("No SciDataFlow config found at \
+        let mut file = File::open(&config_path).map_err(|_| {
+            anyhow!(
+                "No SciDataFlow config found at \
                                  {:?}. Please set with sdf config --name <NAME> \
-                                 [--email <EMAIL> --affiliation <AFFILIATION>]", &config_path))?;
-                                 let mut contents = String::new();
-                                 file.read_to_string(&mut contents)?;
+                                 [--email <EMAIL> --affiliation <AFFILIATION>]",
+                &config_path
+            )
+        })?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
 
-                                 let config: Config = serde_yaml::from_str(&contents)?;
-                                 Ok(config)
+        let config: Config = serde_yaml::from_str(&contents)?;
+        Ok(config)
     }
 
     pub fn save_config(config: Config) -> Result<()> {
@@ -129,7 +130,11 @@ impl Project {
         info!("manifest: {:?}", manifest);
         let data = Project::load(&manifest).context("Failed to load data from the manifest")?;
         let config = Project::load_config().context("Failed to load the project configuration")?;
-        let proj = Project { manifest, data, config };
+        let proj = Project {
+            manifest,
+            data,
+            config,
+        };
         Ok(proj)
     }
 
@@ -138,12 +143,10 @@ impl Project {
             .and_then(|path| path.file_name())
             .map(|os_str| os_str.to_string_lossy().into_owned())
             .unwrap_or_else(|| panic!("invalid project location: is it in root?"))
-
     }
 
-
-    // This tries to figure out a good default name to use, e.g. for 
-    // remote titles or names. 
+    // This tries to figure out a good default name to use, e.g. for
+    // remote titles or names.
     //
     // The precedence is local metadata in manifest > project directory
     pub fn name(&self) -> String {
@@ -157,7 +160,9 @@ impl Project {
         // the new manifest should be in the present directory
         let manifest: PathBuf = PathBuf::from(MANIFEST);
         if manifest.exists() {
-            return Err(anyhow!("Project already initialized. Manifest file already exists."));
+            return Err(anyhow!(
+                "Project already initialized. Manifest file already exists."
+            ));
         } else {
             // TODO could pass metadata parameters here
             let mut data = DataCollection::new();
@@ -165,16 +170,23 @@ impl Project {
                 data.metadata.title = Some(name);
             }
             let config = Project::load_config()?;
-            let proj = Project { manifest, data, config };
+            let proj = Project {
+                manifest,
+                data,
+                config,
+            };
             // save to create the manifest
             proj.save()?;
-
         }
         Ok(())
     }
 
     // TODO could add support for other metadata here
-    pub fn set_metadata(&mut self, title: &Option<String>, description: &Option<String>) -> Result<()> {
+    pub fn set_metadata(
+        &mut self,
+        title: &Option<String>,
+        description: &Option<String>,
+    ) -> Result<()> {
         if let Some(new_title) = title {
             self.data.metadata.title = Some(new_title.to_string());
         }
@@ -184,13 +196,17 @@ impl Project {
         self.save()
     }
 
-    pub fn set_config(name: &Option<String>, email: &Option<String>, affiliation: &Option<String>) -> Result<()> {
+    pub fn set_config(
+        name: &Option<String>,
+        email: &Option<String>,
+        affiliation: &Option<String>,
+    ) -> Result<()> {
         let mut config = Project::load_config().unwrap_or_else(|_| Config {
             user: User {
                 name: "".to_string(),
                 email: None,
                 affiliation: None,
-            }
+            },
         });
         info!("read config: {:?}", config);
         if let Some(new_name) = name {
@@ -230,7 +246,9 @@ impl Project {
 
         if contents.trim().is_empty() {
             // empty manifest, just create a new one
-            return Err(anyhow!("No 'data_manifest.yml' found, has sdf init been run?"));
+            return Err(anyhow!(
+                "No 'data_manifest.yml' found, has sdf init been run?"
+            ));
         }
 
         let data = serde_yaml::from_str(&contents)?;
@@ -252,9 +270,15 @@ impl Project {
     }
 
     pub fn relative_path(&self, path: &Path) -> Result<PathBuf> {
-        let absolute_path = canonicalize(path).context(format!("Failed to canonicalize path '{}'.", path.to_string_lossy()))?;
+        let absolute_path = canonicalize(path).context(format!(
+            "Failed to canonicalize path '{}'.",
+            path.to_string_lossy()
+        ))?;
         //ensure_directory(&absolute_path)?;
-        let path_context = canonicalize(self.path_context()).context(format!("Failed to canonicalize path '{}'.", path.to_string_lossy()))?;
+        let path_context = canonicalize(self.path_context()).context(format!(
+            "Failed to canonicalize path '{}'.",
+            path.to_string_lossy()
+        ))?;
 
         // Compute relative path directly using strip_prefix
         match absolute_path.strip_prefix(&path_context) {
@@ -312,7 +336,7 @@ impl Project {
     // TODO use different more general struct?
     // Or print_fixed_width should be a trait?
     let entry = StatusEntry {
-    local_status: LocalStatusCode::Invalid, 
+    local_status: LocalStatusCode::Invalid,
     remote_status: RemoteStatusCode::NotExists,
     tracked: Some(false),
     remote_service: None,
@@ -322,7 +346,6 @@ impl Project {
     print_status(rows, None);
     Ok(())
     } */
-
 
     pub async fn add(&mut self, files: &Vec<String>) -> Result<()> {
         let mut num_added = 0;
@@ -343,16 +366,18 @@ impl Project {
 
         let filepaths: Result<Vec<String>> = match files {
             None => Ok(self.data.files.keys().cloned().collect::<Vec<String>>()),
-            Some(file_list) => {
-                file_list.iter()
-                    .map(|f| {
-                        Ok(self.relative_path(Path::new(&f))?.to_string_lossy().to_string())
-                    })
-                .collect()
-            }
+            Some(file_list) => file_list
+                .iter()
+                .map(|f| {
+                    Ok(self
+                        .relative_path(Path::new(&f))?
+                        .to_string_lossy()
+                        .to_string())
+                })
+                .collect(),
         };
 
-        let filepaths = filepaths?;  // Use ? here to propagate any errors
+        let filepaths = filepaths?; // Use ? here to propagate any errors
 
         for filepath in filepaths {
             match self.data.update(Some(&filepath), &path_context).await {
@@ -369,9 +394,14 @@ impl Project {
         self.save()
     }
 
-
-    pub async fn link(&mut self, dir: &str, service: &str, 
-                      key: &str, name: &Option<String>, link_only: &bool) -> Result<()> {
+    pub async fn link(
+        &mut self,
+        dir: &str,
+        service: &str,
+        key: &str,
+        name: &Option<String>,
+        link_only: &bool,
+    ) -> Result<()> {
         // (0) get the relative directory path
         let dir = self.relative_path_string(Path::new(dir))?;
 
@@ -382,7 +412,7 @@ impl Project {
         // (2) create a new remote, with a name
         // Associate a project (either by creating it, or finding it on FigShare)
         let name = if let Some(n) = name {
-            n.to_string() 
+            n.to_string()
         } else {
             self.name()
         };
@@ -391,14 +421,14 @@ impl Project {
         let mut remote = match service.as_str() {
             "figshare" => Ok(Remote::FigShareAPI(FigShareAPI::new(&name, None)?)),
             "zenodo" => Ok(Remote::ZenodoAPI(ZenodoAPI::new(&name, None)?)),
-            _ => Err(anyhow!("Service '{}' is not supported!", service))
+            _ => Err(anyhow!("Service '{}' is not supported!", service)),
         }?;
 
         // (3) authenticate remote
         authenticate_remote(&mut remote)?;
 
-        // (4) validate this a proper remote directory (this is 
-        // also done in register_remote() for caution, 
+        // (4) validate this a proper remote directory (this is
+        // also done in register_remote() for caution,
         // but we also want do it here to prevent the situation
         // where self.data.register_remote() fails, but remote_init()
         // is already done.
@@ -406,7 +436,7 @@ impl Project {
 
         // (5) initialize the remote (e.g. for FigShare, this
         // checks that the article doesn't exist (error if it
-        // does), creates it, and sets the FigShare.article_id 
+        // does), creates it, and sets the FigShare.article_id
         // once it is assigned by the remote).
         // Note: we pass the Project to remote_init
         let local_metadata = LocalMetadata::from_project(self);
@@ -429,10 +459,10 @@ impl Project {
     }
 
     // Move a file within the project.
-    // 
-    // Note: file moving is done within relatively higher project-level API. 
+    //
+    // Note: file moving is done within relatively higher project-level API.
     // The reason why is that we need to access Project::relative_path_string() for
-    // both the source *and* destination; the latter does not exist until after the file 
+    // both the source *and* destination; the latter does not exist until after the file
     // has been successfully moved. So the updating is all done on the DataFile
     // directly, since lower interfaces cannot access the relative path.
     pub async fn mv(&mut self, source: &str, destination: &str) -> Result<()> {
@@ -453,44 +483,60 @@ impl Project {
 
             self.save()
         } else {
-            Err(anyhow!("Cannot move file '{}' with 'sdf mv' since it is not in the manifest.", source))
+            Err(anyhow!(
+                "Cannot move file '{}' with 'sdf mv' since it is not in the manifest.",
+                source
+            ))
         }
     }
 
-    pub async fn get(&mut self, url: &str, filename: Option<&str>, 
-                     overwrite: bool) -> Result<()> {
+    pub async fn get(&mut self, url: &str, filename: Option<&str>, overwrite: bool) -> Result<()> {
         let mut downloads = Downloads::new();
         let download = downloads.add(url.to_string(), filename, overwrite)?;
         if let Some(dl) = download {
             let filepath = dl.filename.clone();
 
             // get the file
-            downloads.retrieve(Some("Downloaded '{}'."), None, false).await?;
+            downloads
+                .retrieve(Some("Downloaded '{}'."), None, false)
+                .await?;
 
             // convert to relative path (based on where we are)
             let filepath = self.relative_path_string(Path::new(&filepath))?;
 
             // TODO: should compare MD5s!
             if !self.data.contains(&filepath).await? {
-                let data_file = DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
+                let data_file =
+                    DataFile::new(filepath.clone(), Some(url), &self.path_context()).await?;
 
                 // Note: we do not use Project::add() since this works off strings.
                 // and we need to pass the URL, etc.
                 self.data.register(data_file)?;
                 self.save()?;
             } else {
-                println!("File '{}' already existed in \
-                         the manifest, so it was not added.", &filepath);
+                println!(
+                    "File '{}' already existed in \
+                         the manifest, so it was not added.",
+                    &filepath
+                );
             }
             Ok(())
         } else {
-            Err(anyhow!("The file at '{}' was not downloaded because it would overwrite a file.\n\
-                        Use 'sdf get <URL> --ovewrite' to overwrite it.", url))
+            Err(anyhow!(
+                "The file at '{}' was not downloaded because it would overwrite a file.\n\
+                        Use 'sdf get <URL> --ovewrite' to overwrite it.",
+                url
+            ))
         }
     }
 
-    pub async fn bulk(&mut self, filename: &str, column: Option<u64>, 
-                      header: bool, overwrite: bool) -> Result<()> {
+    pub async fn bulk(
+        &mut self,
+        filename: &str,
+        column: Option<u64>,
+        header: bool,
+        overwrite: bool,
+    ) -> Result<()> {
         let extension = std::path::Path::new(filename)
             .extension()
             .and_then(std::ffi::OsStr::to_str);
@@ -507,7 +553,7 @@ impl Project {
             .has_headers(header)
             .from_reader(file);
 
-        // convert 0-indexed to 1; first column is default 
+        // convert 0-indexed to 1; first column is default
         let column = column.unwrap_or(0) as usize - 1;
 
         let mut downloads = Downloads::new();
@@ -539,7 +585,8 @@ impl Project {
         for (filepath, url) in filepaths.iter().zip(urls.iter()) {
             let rel_file_path = self.relative_path_string(Path::new(&filepath))?;
             if !self.data.contains(&rel_file_path).await? {
-                let data_file = DataFile::new(rel_file_path.clone(), Some(url), &self.path_context()).await?;
+                let data_file =
+                    DataFile::new(rel_file_path.clone(), Some(url), &self.path_context()).await?;
                 self.data.register(data_file)?;
                 num_added += 1;
             } else {
@@ -547,12 +594,17 @@ impl Project {
             }
         }
         let num_skipped = skipped.len();
-        println!("{} URLs found in '{}.'\n\
+        println!(
+            "{} URLs found in '{}.'\n\
                  {} files were downloaded, {} added to manifest ({} were already registered).\n\
                  {} files were skipped because they existed (and --overwrite was no specified).",
-                 num_lines, filename,
-                 urls.len(), num_added, num_already_registered,
-                 num_skipped);
+            num_lines,
+            filename,
+            urls.len(),
+            num_added,
+            num_already_registered,
+            num_skipped
+        );
         self.save()?;
         Ok(())
     }
@@ -585,4 +637,3 @@ impl Project {
         self.data.push(&self.path_context(), overwrite).await
     }
 }
-

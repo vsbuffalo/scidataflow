@@ -1,31 +1,34 @@
 // FigShare API
 //
 // Notes:
-// FigShare's API design is, in my view, a bit awkward. 
-// There are articles, files, and projects. 
+// FigShare's API design is, in my view, a bit awkward.
+// There are articles, files, and projects.
 
-use url::Url;
-use std::fs;
-use std::path::Path;
-use std::io::{Read,Seek,SeekFrom};
-use anyhow::{anyhow,Result};
-#[allow(unused_imports)]
-use log::{info, trace, debug};
-use std::collections::HashMap;
-use serde_derive::{Serialize,Deserialize};
-use serde_json::Value;
-use reqwest::{Method, header::{HeaderMap, HeaderValue}};
-use reqwest::{Client, Response, Body};
+use anyhow::{anyhow, Result};
 use colored::Colorize;
 use futures_util::StreamExt;
+#[allow(unused_imports)]
+use log::{debug, info, trace};
+use reqwest::{
+    header::{HeaderMap, HeaderValue},
+    Method,
+};
+use reqwest::{Body, Client, Response};
+use serde_derive::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::fs;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use url::Url;
 
-#[allow(unused_imports)]
-use crate::{print_info,print_warn};
 use crate::lib::data::DataFile;
-use crate::lib::remote::{AuthKeys, RemoteFile, RequestData};
 use crate::lib::project::LocalMetadata;
+use crate::lib::remote::{AuthKeys, RemoteFile, RequestData};
+#[allow(unused_imports)]
+use crate::{print_info, print_warn};
 
 pub const FIGSHARE_BASE_URL: &str = "https://api.figshare.com/v2/";
 
@@ -39,13 +42,13 @@ fn figshare_api_url() -> String {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct FigShareAPI {
-    #[serde(skip_serializing, skip_deserializing,default="figshare_api_url")]
+    #[serde(skip_serializing, skip_deserializing, default = "figshare_api_url")]
     base_url: String,
     // one remote corresponds to a FigShare article
     article_id: Option<u64>,
     name: String,
     #[serde(skip_serializing, skip_deserializing)]
-    token: String
+    token: String,
 }
 
 pub struct FigShareUpload<'a> {
@@ -74,9 +77,8 @@ pub struct FigShareFile {
 pub struct FigShareNewUpload {
     md5: String,
     name: String,
-    size: u64
+    size: u64,
 }
- 
 
 /// This struct is for response to the initial GET using the
 /// upload_url. It contains more details about the actual upload.
@@ -108,7 +110,6 @@ pub struct FigShareCompleteUpload {
     name: String,
     size: u64,
 }
- 
 
 /// Manage a FigShare Upload
 impl<'a> FigShareUpload<'a> {
@@ -116,7 +117,10 @@ impl<'a> FigShareUpload<'a> {
         FigShareUpload { api_instance: api }
     }
 
-   async fn init_upload(&self, data_file: &DataFile) -> Result<(FigShareFile, FigSharePendingUploadInfo)> {
+    async fn init_upload(
+        &self,
+        data_file: &DataFile,
+    ) -> Result<(FigShareFile, FigSharePendingUploadInfo)> {
         debug!("initializing upload of '{:?}'", data_file);
         // Requires: article ID, in FigShareArticle struct
         // (0) create URL and data
@@ -125,36 +129,39 @@ impl<'a> FigShareUpload<'a> {
         let data = FigShareNewUpload {
             name: data_file.basename()?,
             md5: data_file.md5.clone(),
-            size: data_file.size
+            size: data_file.size,
         };
         // (1) issue POST to get location
-        let response = self.api_instance.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
+        let response = self
+            .api_instance
+            .issue_request(Method::POST, &url, Some(RequestData::Json(data)))
+            .await?;
         debug!("upload post response: {:?}", response);
 
         // (2) get location
         let data = response.json::<Value>().await?;
         let location_url = match data.get("location").and_then(|loc| loc.as_str()) {
             Some(loc) => Ok(loc),
-            None => Err(anyhow!("Response does not have 'location' set!"))
+            None => Err(anyhow!("Response does not have 'location' set!")),
         }?;
         // we need to extract out the non-domain part
         let parsed_url = Url::parse(location_url)?;
-        let location = parsed_url.path()
-            .to_string()
-            .replacen("/v2/", "/", 1);
+        let location = parsed_url.path().to_string().replacen("/v2/", "/", 1);
         debug!("upload location: {:?}", location);
 
         // (3) issue GET to retrieve upload info
-        let response = self.api_instance
+        let response = self
+            .api_instance
             .issue_request::<HashMap<String, String>>(Method::GET, &location, None)
             .await?;
         let upload_info: FigShareFile = response.json().await?;
         debug!("upload info: {:?}", upload_info);
 
         // (4) Now, we need to issue another GET to initiate upload.
-        // This returns the file parts info, which tells us how to split 
+        // This returns the file parts info, which tells us how to split
         // the file.
-        let response = self.api_instance
+        let response = self
+            .api_instance
             .issue_request::<HashMap<String, String>>(Method::GET, &upload_info.upload_url, None)
             .await?;
         let pending_upload_info: FigSharePendingUploadInfo = response.json().await?;
@@ -162,10 +169,13 @@ impl<'a> FigShareUpload<'a> {
         Ok((upload_info, pending_upload_info))
     }
 
-    async fn upload_parts(&self, data_file: &DataFile, 
-                          upload_info: &FigShareFile,
-                          pending_upload_info: &FigSharePendingUploadInfo,
-                          path_context: &Path) -> Result<()> {
+    async fn upload_parts(
+        &self,
+        data_file: &DataFile,
+        upload_info: &FigShareFile,
+        pending_upload_info: &FigSharePendingUploadInfo,
+        path_context: &Path,
+    ) -> Result<()> {
         let full_path = path_context.join(&data_file.path);
         let url = &upload_info.upload_url;
         let mut file = fs::File::open(full_path)?;
@@ -180,9 +190,18 @@ impl<'a> FigShareUpload<'a> {
             file.read_exact(&mut data)?;
 
             let part_url = format!("{}/{}", &url, part.part_no);
-            let _response = self.api_instance.issue_request::<HashMap<String, String>>(Method::PUT, &part_url, Some(RequestData::Binary(data)))
+            let _response = self
+                .api_instance
+                .issue_request::<HashMap<String, String>>(
+                    Method::PUT,
+                    &part_url,
+                    Some(RequestData::Binary(data)),
+                )
                 .await?;
-            debug!("uploaded part {} (offsets {}:{})", part.part_no, start_offset, end_offset)
+            debug!(
+                "uploaded part {} (offsets {}:{})",
+                part.part_no, start_offset, end_offset
+            )
         }
 
         Ok(())
@@ -194,15 +213,25 @@ impl<'a> FigShareUpload<'a> {
         let data = FigShareCompleteUpload {
             id: article_id,
             name: upload_info.name.clone(),
-            size: upload_info.size
+            size: upload_info.size,
         };
-        self.api_instance.issue_request(Method::POST, &url, Some(RequestData::Json(data))).await?;
+        self.api_instance
+            .issue_request(Method::POST, &url, Some(RequestData::Json(data)))
+            .await?;
         Ok(())
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn upload(
+        &self,
+        data_file: &DataFile,
+        path_context: &Path,
+        overwrite: bool,
+    ) -> Result<()> {
         if !data_file.is_alive(path_context) {
-            return Err(anyhow!("Cannot upload: file '{}' does not exist lcoally.", data_file.path));
+            return Err(anyhow!(
+                "Cannot upload: file '{}' does not exist lcoally.",
+                data_file.path
+            ));
         }
         // check if any files are associated with this article
         let article_id = self.api_instance.get_article_id()?;
@@ -210,18 +239,25 @@ impl<'a> FigShareUpload<'a> {
         let existing_file = self.api_instance.file_exists(&name).await?;
         if let Some(file) = existing_file {
             if !overwrite {
-                print_info!("FigShare::upload() found file '{}' in FigShare \
+                print_info!(
+                    "FigShare::upload() found file '{}' in FigShare \
                             Article ID={}. Since overwrite=false, 
                             this file will not be deleted and re-upload.",
-                            name, article_id);
+                    name,
+                    article_id
+                );
             } else {
-                info!("FigShare::upload() is deleting file '{}' since \
-                      overwrite=true.", name);
+                info!(
+                    "FigShare::upload() is deleting file '{}' since \
+                      overwrite=true.",
+                    name
+                );
                 self.api_instance.delete_article_file(&file).await?;
-            } 
-        } 
+            }
+        }
         let (upload_info, pending_upload_info) = self.init_upload(data_file).await?;
-        self.upload_parts(data_file, &upload_info, &pending_upload_info, path_context).await?;
+        self.upload_parts(data_file, &upload_info, &pending_upload_info, path_context)
+            .await?;
         self.complete_upload(&upload_info).await?;
         Ok(())
     }
@@ -234,7 +270,7 @@ impl From<FigShareFile> for RemoteFile {
             md5: Some(fgsh.computed_md5),
             size: Some(fgsh.size),
             remote_service: "FigShare".to_string(),
-            url: Some(fgsh.download_url)
+            url: Some(fgsh.download_url),
         }
     }
 }
@@ -242,16 +278,16 @@ impl From<FigShareFile> for RemoteFile {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct FigShareArticle {
     title: String,
-    id: u64
+    id: u64,
 }
 
 impl FigShareAPI {
     pub fn new(name: &str, base_url: Option<String>) -> Result<Self> {
-        // Note: this constructor is not called often, except through 
-        // Project::link(), since serde is usually deserializing the 
+        // Note: this constructor is not called often, except through
+        // Project::link(), since serde is usually deserializing the
         // new FigShareAPI Remote variant from the manifest.
         let auth_keys = if base_url.is_none() {
-            // using the default base_url means we're 
+            // using the default base_url means we're
             // not using mock HTTP servers
             AuthKeys::new()
         } else {
@@ -263,11 +299,11 @@ impl FigShareAPI {
         };
         let token = auth_keys.get("figshare".to_string())?;
         let base_url = base_url.unwrap_or(FIGSHARE_BASE_URL.to_string());
-        Ok(FigShareAPI { 
+        Ok(FigShareAPI {
             base_url,
             article_id: None,
-            name: name.to_string(), 
-            token
+            name: name.to_string(),
+            token,
         })
     }
 
@@ -279,11 +315,15 @@ impl FigShareAPI {
         self.base_url.clone()
     }
 
-    async fn issue_request<T: serde::Serialize>(&self, method: Method, endpoint: &str,
-                                                data: Option<RequestData<T>>) -> Result<Response> {
+    async fn issue_request<T: serde::Serialize>(
+        &self,
+        method: Method,
+        endpoint: &str,
+        data: Option<RequestData<T>>,
+    ) -> Result<Response> {
         let mut headers = HeaderMap::new();
 
-        // FigShare will give download links outside the API, so we handle 
+        // FigShare will give download links outside the API, so we handle
         // that possibility here.
         let url = if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
             endpoint.to_string()
@@ -296,7 +336,10 @@ impl FigShareAPI {
         let client = Client::new();
         let mut request = client.request(method, &url);
 
-        headers.insert("Authorization", HeaderValue::from_str(&format!("token {}", self.token)).unwrap());
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("token {}", self.token)).unwrap(),
+        );
         trace!("headers: {:?}", headers);
         request = request.headers(headers);
 
@@ -308,8 +351,10 @@ impl FigShareAPI {
                 let stream = tokio_util::io::ReaderStream::new(file);
                 let body = Body::wrap_stream(stream);
                 request.body(body)
-            },
-            Some(RequestData::Empty) => request.json(&serde_json::Value::Object(serde_json::Map::new())),
+            }
+            Some(RequestData::Empty) => {
+                request.json(&serde_json::Value::Object(serde_json::Map::new()))
+            }
             None => request,
         };
 
@@ -318,10 +363,14 @@ impl FigShareAPI {
         if response_status.is_success() {
             Ok(response)
         } else {
-            Err(anyhow!("HTTP Error: {}\nurl: {:?}\n{:?}", response_status, url, response.text().await?))
+            Err(anyhow!(
+                "HTTP Error: {}\nurl: {:?}\n{:?}",
+                response_status,
+                url,
+                response.text().await?
+            ))
         }
     }
-
 
     // Download a single file through the FigShare API
     // NOTE: Mostly deprecated due to trauma-based downloads.
@@ -348,13 +397,17 @@ impl FigShareAPI {
         debug!("creating data for article: {:?}", data);
 
         // (2) issue request and parse out the article ID from location
-        let response = self.issue_request(Method::POST, endpoint, Some(RequestData::Json(data))).await?;
+        let response = self
+            .issue_request(Method::POST, endpoint, Some(RequestData::Json(data)))
+            .await?;
         let data = response.json::<Value>().await?;
         let article_id_result = match data.get("location").and_then(|loc| loc.as_str()) {
             Some(loc) => Ok(loc.split('/').last().unwrap_or_default().to_string()),
-            None => Err(anyhow!("Response does not have 'location' set!"))
+            None => Err(anyhow!("Response does not have 'location' set!")),
         };
-        let article_id: u64 = article_id_result?.parse::<u64>().map_err(|_| anyhow!("Failed to parse article ID"))?;
+        let article_id: u64 = article_id_result?
+            .parse::<u64>()
+            .map_err(|_| anyhow!("Failed to parse article ID"))?;
         debug!("got article ID: {:?}", article_id);
 
         // (3) create and return the FigShareArticle
@@ -364,9 +417,16 @@ impl FigShareAPI {
         })
     }
 
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
+    pub async fn upload(
+        &self,
+        data_file: &DataFile,
+        path_context: &Path,
+        overwrite: bool,
+    ) -> Result<bool> {
         let this_upload = FigShareUpload::new(self);
-        this_upload.upload(data_file, path_context, overwrite).await?;
+        this_upload
+            .upload(data_file, path_context, overwrite)
+            .await?;
         Ok(true)
     }
 
@@ -376,10 +436,16 @@ impl FigShareAPI {
 
     pub async fn find_article(&self) -> Result<Option<FigShareArticle>> {
         let articles = self.get_articles().await?;
-        let matches_found: Vec<_> = articles.into_iter().filter(|a| a.title == self.name).collect();
+        let matches_found: Vec<_> = articles
+            .into_iter()
+            .filter(|a| a.title == self.name)
+            .collect();
         if !matches_found.is_empty() {
             if matches_found.len() > 1 {
-                Err(anyhow!("Found multiple FigShare Articles with the title '{}'", self.name))
+                Err(anyhow!(
+                    "Found multiple FigShare Articles with the title '{}'",
+                    self.name
+                ))
             } else {
                 Ok(Some(matches_found[0].clone()))
             }
@@ -389,17 +455,24 @@ impl FigShareAPI {
     }
 
     // FigShare Remote initialization
-    // 
+    //
     // This creates a FigShare article for the tracked directory.
     #[allow(unused)]
-    pub async fn remote_init(&mut self, local_metadata: LocalMetadata, link_only: bool) -> Result<()> {
+    pub async fn remote_init(
+        &mut self,
+        local_metadata: LocalMetadata,
+        link_only: bool,
+    ) -> Result<()> {
         // (1) Let's make sure there is no Article that exists
         // with this same name
         let found_match = self.find_article().await?;
         let article = if let Some(existing_info) = found_match {
             if !link_only {
-                return Err(anyhow!("An existing FigShare Article with the title \
-                                   '{}' was found. Use --link-only to link.", self.name));
+                return Err(anyhow!(
+                    "An existing FigShare Article with the title \
+                                   '{}' was found. Use --link-only to link.",
+                    self.name
+                ));
             }
             existing_info
         } else {
@@ -417,7 +490,9 @@ impl FigShareAPI {
     // TODO? does this get published data sets?
     async fn get_articles(&self) -> Result<Vec<FigShareArticle>> {
         let url = "/account/articles";
-        let response = self.issue_request::<HashMap<String, String>>(Method::GET, url, None).await?;
+        let response = self
+            .issue_request::<HashMap<String, String>>(Method::GET, url, None)
+            .await?;
         let articles: Vec<FigShareArticle> = response.json().await?;
         Ok(articles)
     }
@@ -430,9 +505,9 @@ impl FigShareAPI {
 
     // Get all files from a FigShare Article, in a HashMap
     // with file name as keys.
-    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,FigShareFile>> {
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String, FigShareFile>> {
         let mut files: Vec<FigShareFile> = self.get_files().await?;
-        let mut files_hash: HashMap<String,FigShareFile> = HashMap::new();
+        let mut files_hash: HashMap<String, FigShareFile> = HashMap::new();
         for file in files.iter_mut() {
             files_hash.insert(file.name.clone(), file.clone());
         }
@@ -447,7 +522,9 @@ impl FigShareAPI {
     }
 
     pub fn get_article_id(&self) -> Result<u64> {
-        let article_id  = self.article_id.ok_or(anyhow!("Internal Error: FigShare.article_id is None."))?;
+        let article_id = self
+            .article_id
+            .ok_or(anyhow!("Internal Error: FigShare.article_id is None."))?;
         Ok(article_id)
     }
 
@@ -455,40 +532,44 @@ impl FigShareAPI {
     pub async fn get_files(&self) -> Result<Vec<FigShareFile>> {
         let article_id = self.get_article_id()?;
         let url = format!("/account/articles/{}/files", article_id);
-        let response = self.issue_request::<HashMap<String,String>>(Method::GET, &url, None).await?;
+        let response = self
+            .issue_request::<HashMap<String, String>>(Method::GET, &url, None)
+            .await?;
         let files: Vec<FigShareFile> = response.json().await?;
         Ok(files)
     }
 
     // Delete Article
     /* async fn delete_article(&self, article: &FigShareArticle) -> Result<()> {
-       let url = format!("account/articles/{}", article.id);
-       self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
-       Ok(())
-       }
-       */
+    let url = format!("account/articles/{}", article.id);
+    self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None).await?;
+    Ok(())
+    }
+    */
 
     // Delete the specified file from the FigShare Article
-    // 
+    //
     // Note: we require a &FigShareFile as a way to enforce it exists,
     // e.g. is the result of a previous query.
     async fn delete_article_file(&self, file: &FigShareFile) -> Result<()> {
         let article_id = self.get_article_id()?;
         let url = format!("account/articles/{}/files/{}", article_id, file.id);
-        self.issue_request::<HashMap<String,String>>(Method::DELETE, &url, None).await?;
-        info!("deleted FigShare file '{}' (Article ID={})", file.name, article_id);
+        self.issue_request::<HashMap<String, String>>(Method::DELETE, &url, None)
+            .await?;
+        info!(
+            "deleted FigShare file '{}' (Article ID={})",
+            file.name, article_id
+        );
         Ok(())
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::logging_setup::setup;
     use httpmock::prelude::*;
     use serde_json::json;
-    use crate::logging_setup::setup;
-
 
     #[tokio::test]
     async fn test_create_article() {
@@ -503,15 +584,17 @@ mod tests {
         let create_article_mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/account/articles")
-                .header("Authorization", &format!("token {}", TEST_TOKEN.to_string()))
+                .header(
+                    "Authorization",
+                    &format!("token {}", TEST_TOKEN.to_string()),
+                )
                 .json_body(json!({
                     "title": title.to_string(),
                     "defined_type": "dataset"
                 }));
-            then.status(201)
-                .json_body(json!({
-                    "location": format!("{}account/articles/{}", server.url(""), expected_id)
-                }));
+            then.status(201).json_body(json!({
+                "location": format!("{}account/articles/{}", server.url(""), expected_id)
+            }));
         });
 
         // Define a sample title for the article
@@ -529,6 +612,5 @@ mod tests {
 
         // Verify that the mock was called exactly once
         create_article_mock.assert();
-    } 
-
+    }
 }

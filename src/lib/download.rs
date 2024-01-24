@@ -1,12 +1,12 @@
-use anyhow::{anyhow,Result,Context};
+use anyhow::{anyhow, Context, Result};
+use reqwest::Url;
 use std::fs;
 use std::path::PathBuf;
-use reqwest::Url;
 
-use trauma::downloader::{DownloaderBuilder,StyleOptions,ProgressBarOpts};
 use trauma::download::Download;
+use trauma::downloader::{DownloaderBuilder, ProgressBarOpts, StyleOptions};
 
-use crate::lib::progress::{DEFAULT_PROGRESS_STYLE, DEFAULT_PROGRESS_INC};
+use crate::lib::progress::{DEFAULT_PROGRESS_INC, DEFAULT_PROGRESS_STYLE};
 use crate::lib::utils::pluralize;
 
 pub struct Downloads {
@@ -42,19 +42,22 @@ impl Downloads {
         Downloads { queue }
     }
 
-    pub fn add<T: Downloadable>(&mut self, item: T, filename: Option<&str>,
-                                overwrite: bool) -> Result<Option<&Download>> {
+    pub fn add<T: Downloadable>(
+        &mut self,
+        item: T,
+        filename: Option<&str>,
+        overwrite: bool,
+    ) -> Result<Option<&Download>> {
         let url = item.to_url()?;
 
         let resolved_filename = match filename {
             Some(name) => name.to_string(),
-            None => {
-                url.path_segments()
-                    .ok_or_else(|| anyhow::anyhow!("Error parsing URL."))?
-                    .last()
-                    .ok_or_else(|| anyhow::anyhow!("Error getting filename from download URL."))?
-                    .to_string()
-            }
+            None => url
+                .path_segments()
+                .ok_or_else(|| anyhow::anyhow!("Error parsing URL."))?
+                .last()
+                .ok_or_else(|| anyhow::anyhow!("Error getting filename from download URL."))?
+                .to_string(),
         };
 
         let file_path = PathBuf::from(&resolved_filename);
@@ -62,38 +65,47 @@ impl Downloads {
             return Ok(None);
         }
 
-        let download = Download { url, filename: resolved_filename };
+        let download = Download {
+            url,
+            filename: resolved_filename,
+        };
         self.queue.push(download);
-        Ok(Some(self.queue.last().ok_or(anyhow::anyhow!("Failed to add download"))?))
+        Ok(Some(
+            self.queue
+                .last()
+                .ok_or(anyhow::anyhow!("Failed to add download"))?,
+        ))
     }
 
     pub fn default_style(&self) -> Result<StyleOptions> {
         let style = ProgressBarOpts::new(
             Some(DEFAULT_PROGRESS_STYLE.to_string()),
             Some(DEFAULT_PROGRESS_INC.to_string()),
-            true, true);
+            true,
+            true,
+        );
 
         let style_clone = style.clone();
         Ok(StyleOptions::new(style, style_clone))
     }
 
-
-    // Retrieve all files in the download queue. 
+    // Retrieve all files in the download queue.
     //
     // Note: if the file is in the queue, at this point it is considered *overwrite safe*.
     // This is because overwrite-safety is checked at Downloads::add(), per-file.
-    // The trauma crate does not overwrite files; delete must be done manually here 
+    // The trauma crate does not overwrite files; delete must be done manually here
     // first if it exists.
-    pub async fn retrieve(&self, 
-                          success_status: Option<&str>, 
-                          no_downloads_message: Option<&str>,
-                          show_total: bool) -> Result<()> {
+    pub async fn retrieve(
+        &self,
+        success_status: Option<&str>,
+        no_downloads_message: Option<&str>,
+        show_total: bool,
+    ) -> Result<()> {
         let downloads = &self.queue;
         let total_files = downloads.len();
-        if !downloads.is_empty() { 
-
+        if !downloads.is_empty() {
             // Let's handle the file operations:
-            // 1) Delete the files if they exist, since if it's in the queue, it's 
+            // 1) Delete the files if they exist, since if it's in the queue, it's
             //    overwrite-safe.
             // 2) Create the directory structure if it does not exist.
             for file in downloads {
@@ -115,12 +127,18 @@ impl Downloads {
             downloader.download(downloads).await;
             if show_total {
                 let punc = if total_files > 0 { "." } else { ":" };
-                println!("Downloaded {}{}", pluralize(total_files as u64, "file"), punc);
+                println!(
+                    "Downloaded {}{}",
+                    pluralize(total_files as u64, "file"),
+                    punc
+                );
             }
             for download in downloads {
                 if let Some(msg) = success_status {
                     let filename = PathBuf::from(&download.filename);
-                    let name_str = filename.file_name().ok_or(anyhow!("Internal Error: could not extract filename from download"))?;
+                    let name_str = filename.file_name().ok_or(anyhow!(
+                        "Internal Error: could not extract filename from download"
+                    ))?;
                     //println!(" - {}", name_str.to_string_lossy());
                     println!("{}", msg.replace("{}", &name_str.to_string_lossy()));
                 }

@@ -1,21 +1,21 @@
+use anyhow::{anyhow, Result};
+#[allow(unused_imports)]
+use log::{debug, info, trace};
+use reqwest::Url;
+use serde_derive::{Deserialize, Serialize};
 use serde_yaml;
-use trauma::download::Download;
+use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::fs::File;
-use std::path::Path;
 use std::io::Read;
-use std::env;
-use anyhow::{anyhow,Result};
-#[allow(unused_imports)]
-use log::{info, trace, debug};
-use std::collections::HashMap;
-use serde_derive::{Serialize,Deserialize};
-use reqwest::Url;
+use std::path::Path;
+use trauma::download::Download;
 
-use crate::lib::data::{DataFile,MergedFile};
-use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::dryad::DataDryadAPI;
+use crate::lib::api::figshare::FigShareAPI;
 use crate::lib::api::zenodo::ZenodoAPI;
+use crate::lib::data::{DataFile, MergedFile};
 use crate::lib::project::LocalMetadata;
 
 const AUTHKEYS: &str = ".scidataflow_authkeys.yml";
@@ -26,38 +26,37 @@ pub struct RemoteFile {
     pub md5: Option<String>,
     pub size: Option<u64>,
     pub remote_service: String,
-    pub url: Option<String>
+    pub url: Option<String>,
 }
-
 
 // This is the status of the local state with the remote state.
 // There are huge number of combinations between tracked, untracked
-// local files, and whether the manifest and file MD5s agree or 
+// local files, and whether the manifest and file MD5s agree or
 // disagree (a "messy" state). However, it's better to handle few
 // cases well, and error out.
 //
 // Note that these states are independent of whether something is
-// tracked. Tracking only indicates whether the next pull/push 
-// should sync the file (if tracked). Tracked files are *always* 
+// tracked. Tracking only indicates whether the next pull/push
+// should sync the file (if tracked). Tracked files are *always*
 // in the manifest (since that is where that state is stored).
 //
-// NoLocal files will *not* be sync'd, since they are no in the 
-// manifest, and sciflow will only get pull/push things in the 
+// NoLocal files will *not* be sync'd, since they are no in the
+// manifest, and sciflow will only get pull/push things in the
 // manifest.
 //
 // Clean state: everything on the manifest tracked by the remote is
 // local, with nothing else.
-#[derive(Debug,PartialEq,Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum RemoteStatusCode {
-    Current,              // local and remote files are identical
-    MessyLocal,           // local file is different than remote and manifest, which agree
-    Different,            // the local file is current, but different than the remote
-    NotExists,            // no remote file
-    Exists,               // remote file exists, but remote does not support MD5s
-    NoLocal,              // a file on the remote, but not in manifest or found locally
-    DeletedLocal,         // a file on the remote and in manifest, but not found locally
+    Current,      // local and remote files are identical
+    MessyLocal,   // local file is different than remote and manifest, which agree
+    Different,    // the local file is current, but different than the remote
+    NotExists,    // no remote file
+    Exists,       // remote file exists, but remote does not support MD5s
+    NoLocal,      // a file on the remote, but not in manifest or found locally
+    DeletedLocal, // a file on the remote and in manifest, but not found locally
     //OutsideSource,        // a file on the remote, but not in manifest but *is* found locally
-    Invalid
+    Invalid,
 }
 
 impl RemoteFile {
@@ -75,13 +74,12 @@ impl RemoteFile {
 
 #[derive(Serialize, Deserialize, Default, PartialEq, Debug)]
 pub struct AuthKeys {
-    keys: HashMap<String,String>
+    keys: HashMap<String, String>,
 }
 
 impl AuthKeys {
     pub fn new() -> Self {
-        let home_dir = env::var("HOME")
-            .expect("Could not infer home directory");
+        let home_dir = env::var("HOME").expect("Could not infer home directory");
         let path = Path::new(&home_dir).join(AUTHKEYS);
         let keys = match path.exists() {
             true => {
@@ -92,9 +90,9 @@ impl AuthKeys {
                     .unwrap();
                 serde_yaml::from_str(&contents)
                     .unwrap_or_else(|_| panic!("Cannot load {}!", AUTHKEYS))
-            }, 
+            }
             false => {
-                let keys: HashMap<String,String> = HashMap::new();
+                let keys: HashMap<String, String> = HashMap::new();
                 keys
             }
         };
@@ -109,7 +107,7 @@ impl AuthKeys {
     }
 
     pub fn temporary_add(&mut self, service: &str, key: &str) {
-        // no save, i.e. for testing -- we do *not* want to overwrite the 
+        // no save, i.e. for testing -- we do *not* want to overwrite the
         // dev's own keys.
         let service = service.to_lowercase();
         self.keys.insert(service, key.to_owned());
@@ -118,15 +116,14 @@ impl AuthKeys {
     pub fn get(&self, service: String) -> Result<String> {
         match self.keys.get(&service) {
             None => Err(anyhow!("no key found for service '{}'", service)),
-            Some(key) => Ok(key.to_string())
+            Some(key) => Ok(key.to_string()),
         }
     }
 
     pub fn save(&self) {
-        let serialized_keys = serde_yaml::to_string(&self.keys)
-            .expect("Cannot serialize authentication keys!");
-        let home_dir = env::var("HOME")
-            .expect("Could not infer home directory");
+        let serialized_keys =
+            serde_yaml::to_string(&self.keys).expect("Cannot serialize authentication keys!");
+        let home_dir = env::var("HOME").expect("Could not infer home directory");
         let path = Path::new(&home_dir).join(AUTHKEYS);
         fs::write(path, serialized_keys)
             .unwrap_or_else(|_| panic!("Cound not write {}!", AUTHKEYS));
@@ -139,7 +136,6 @@ pub enum Remote {
     DataDryadAPI(DataDryadAPI),
     ZenodoAPI(ZenodoAPI),
 }
-
 
 macro_rules! service_not_implemented {
     ($service:expr) => {
@@ -154,11 +150,15 @@ impl Remote {
         match self {
             Remote::FigShareAPI(_) => "FigShare",
             Remote::DataDryadAPI(_) => "Dryad",
-            Remote::ZenodoAPI(_) => "Zenodo"
+            Remote::ZenodoAPI(_) => "Zenodo",
         }
     }
     // initialize the remote (i.e. tell it we have a new empty data set)
-    pub async fn remote_init(&mut self, local_metadata: LocalMetadata, link_only: bool) -> Result<()> {
+    pub async fn remote_init(
+        &mut self,
+        local_metadata: LocalMetadata,
+        link_only: bool,
+    ) -> Result<()> {
         match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.remote_init(local_metadata, link_only).await,
             Remote::ZenodoAPI(znd_api) => znd_api.remote_init(local_metadata, link_only).await,
@@ -172,18 +172,25 @@ impl Remote {
             Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
     }
-    pub async fn get_files_hashmap(&self) -> Result<HashMap<String,RemoteFile>> {
+    pub async fn get_files_hashmap(&self) -> Result<HashMap<String, RemoteFile>> {
         // now we can use the common interface! :)
         let remote_files = self.get_files().await?;
-        let mut file_map: HashMap<String,RemoteFile> = HashMap::new();
+        let mut file_map: HashMap<String, RemoteFile> = HashMap::new();
         for file in remote_files.into_iter() {
             file_map.insert(file.name.clone(), file.clone());
         }
         Ok(file_map)
     }
-    pub async fn upload(&self, data_file: &DataFile, path_context: &Path, overwrite: bool) -> Result<bool> {
+    pub async fn upload(
+        &self,
+        data_file: &DataFile,
+        path_context: &Path,
+        overwrite: bool,
+    ) -> Result<bool> {
         match self {
-            Remote::FigShareAPI(fgsh_api) => fgsh_api.upload(data_file, path_context, overwrite).await,
+            Remote::FigShareAPI(fgsh_api) => {
+                fgsh_api.upload(data_file, path_context, overwrite).await
+            }
             Remote::ZenodoAPI(znd_api) => znd_api.upload(data_file, path_context, overwrite).await,
             Remote::DataDryadAPI(_) => service_not_implemented!("DataDryad"),
         }
@@ -191,23 +198,36 @@ impl Remote {
     // Get Download info: the URL (with token) and destination
     // TODO: could be struct, if some APIs require more authentication
     // Note: requires each API actually *check* overwrite.
-    pub fn get_download_info(&self, merged_file: &MergedFile, path_context: &Path, overwrite: bool) -> Result<Download> {
-        // if local DataFile is none, not in manifest; 
+    pub fn get_download_info(
+        &self,
+        merged_file: &MergedFile,
+        path_context: &Path,
+        overwrite: bool,
+    ) -> Result<Download> {
+        // if local DataFile is none, not in manifest;
         // do not download
         let data_file = match &merged_file.local {
             None => return Err(anyhow!("Cannot download() without local DataFile.")),
-            Some(file) => file
+            Some(file) => file,
         };
         // check to make sure we won't overwrite
         if data_file.is_alive(path_context) && !overwrite {
-            return Err(anyhow!("Data file '{}' exists locally, and would be \
+            return Err(anyhow!(
+                "Data file '{}' exists locally, and would be \
                                overwritten by download. Use --overwrite to download.",
-                               data_file.path));
+                data_file.path
+            ));
         }
         // if no remote, there is nothing to download,
         // silently return Ok. Get URL.
-        let remote = merged_file.remote.as_ref().ok_or(anyhow!("Remote is None"))?;
-        let url = remote.url.as_ref().ok_or(anyhow!("Cannot download; download URL not set."))?;
+        let remote = merged_file
+            .remote
+            .as_ref()
+            .ok_or(anyhow!("Remote is None"))?;
+        let url = remote
+            .url
+            .as_ref()
+            .ok_or(anyhow!("Cannot download; download URL not set."))?;
 
         let authenticated_url = match self {
             Remote::FigShareAPI(fgsh_api) => fgsh_api.authenticate_url(url),
@@ -217,7 +237,7 @@ impl Remote {
         let save_path = &data_file.full_path(path_context)?;
         let url = Url::parse(&authenticated_url)?;
         let filename = save_path.to_string_lossy().to_string();
-        Ok( Download { url, filename })
+        Ok(Download { url, filename })
     }
 }
 
@@ -233,25 +253,32 @@ pub fn authenticate_remote(remote: &mut Remote) -> Result<()> {
 
     match remote {
         Remote::FigShareAPI(ref mut fgsh_api) => {
-            let token = auth_keys.keys.get("figshare").cloned()
+            let token = auth_keys
+                .keys
+                .get("figshare")
+                .cloned()
                 .ok_or_else(|| anyhow::anyhow!(error_message("FigShare", "figshare")))?;
             fgsh_api.set_token(token);
-        },
+        }
         Remote::ZenodoAPI(ref mut znd_api) => {
-            let token = auth_keys.keys.get("zenodo").cloned()
+            let token = auth_keys
+                .keys
+                .get("zenodo")
+                .cloned()
                 .ok_or_else(|| anyhow::anyhow!(error_message("Zenodo", "zenodo")))?;
             znd_api.set_token(token);
-        },
+        }
         // handle other Remote variants as necessary
-        _ => Err(anyhow!("Could not find correct API in authenticate_remote()"))?
+        _ => Err(anyhow!(
+            "Could not find correct API in authenticate_remote()"
+        ))?,
     }
     Ok(())
 }
 
-
 // Common enum for issue_request() methods of APIs
 //
-// Notes: Binary() should be used only for small amounts of data, 
+// Notes: Binary() should be used only for small amounts of data,
 // that can be read into memory, e.g. FigShare's upload_parts().
 #[derive(Debug)]
 pub enum RequestData<T: serde::Serialize> {
@@ -259,20 +286,18 @@ pub enum RequestData<T: serde::Serialize> {
     Binary(Vec<u8>),
     File(tokio::fs::File),
     Stream(tokio::fs::File),
-    Empty
+    Empty,
 }
 
-
 /* impl DataDryadAPI {
-   fn upload(&self) {
-   }
-   fn download(&self) {
-   }
-   fn ls(&self) {
-   }
-   fn get_project(&self) -> Result<String, String> {
-   Ok("ID".to_string())        
-   }
-   }
-   */
-
+fn upload(&self) {
+}
+fn download(&self) {
+}
+fn ls(&self) {
+}
+fn get_project(&self) -> Result<String, String> {
+Ok("ID".to_string())
+}
+}
+*/
