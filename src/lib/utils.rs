@@ -6,6 +6,7 @@ use log::{debug, info, trace};
 use md5::Context;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,12 @@ pub fn ensure_directory(dir: &Path) -> Result<()> {
             dir.to_string_lossy()
         ))
     }
+}
+
+pub fn is_directory(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
 }
 
 pub fn ensure_exists(path: &Path) -> Result<()> {
