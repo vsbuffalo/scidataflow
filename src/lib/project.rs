@@ -21,6 +21,8 @@ use crate::lib::utils::{load_file, pluralize, print_status};
 #[allow(unused_imports)]
 use crate::{print_info, print_warn};
 
+use super::utils::is_directory;
+
 const MANIFEST: &str = "data_manifest.yml";
 
 pub fn find_manifest(start_dir: Option<&PathBuf>, filename: &str) -> Option<PathBuf> {
@@ -466,10 +468,21 @@ impl Project {
     // has been successfully moved. So the updating is all done on the DataFile
     // directly, since lower interfaces cannot access the relative path.
     pub async fn mv(&mut self, source: &str, destination: &str) -> Result<()> {
-        let source_path = self.relative_path_string(Path::new(source))?;
-        if let Some(file) = self.data.files.remove(&source_path) {
+        let source_path = Path::new(source);
+        let source_path_str = self.relative_path_string(source_path)?;
+        if let Some(file) = self.data.files.remove(&source_path_str) {
+            let mut destination_path = PathBuf::from(destination);
+
+            if is_directory(&destination_path) {
+                // if destination is a directory, append the file name from
+                // the source path to mimic unix mv
+                if let Some(file_name) = source_path.file_name() {
+                    destination_path = destination_path.join(file_name);
+                }
+            }
+
             // move the actual file
-            rename(source, destination).context("Error encountered when moving file.")?;
+            rename(source, destination_path).context("Error encountered when moving file.")?;
 
             // update the relative path
             let relative_destination = self.relative_path_string(Path::new(destination))?;
@@ -516,7 +529,7 @@ impl Project {
             } else {
                 println!(
                     "File '{}' already existed in \
-                         the manifest, so it was not added.",
+                    the manifest, so it was not added.",
                     &filepath
                 );
             }
@@ -524,7 +537,7 @@ impl Project {
         } else {
             Err(anyhow!(
                 "The file at '{}' was not downloaded because it would overwrite a file.\n\
-                        Use 'sdf get <URL> --ovewrite' to overwrite it.",
+                    Use 'sdf get <URL> --ovewrite' to overwrite it.",
                 url
             ))
         }
@@ -596,8 +609,8 @@ impl Project {
         let num_skipped = skipped.len();
         println!(
             "{} URLs found in '{}.'\n\
-                 {} files were downloaded, {} added to manifest ({} were already registered).\n\
-                 {} files were skipped because they existed (and --overwrite was no specified).",
+            {} files were downloaded, {} added to manifest ({} were already registered).\n\
+            {} files were skipped because they existed (and --overwrite was no specified).",
             num_lines,
             filename,
             urls.len(),

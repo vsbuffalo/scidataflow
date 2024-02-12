@@ -6,6 +6,7 @@ use log::{debug, info, trace};
 use md5::Context;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,12 @@ pub fn ensure_directory(dir: &Path) -> Result<()> {
             dir.to_string_lossy()
         ))
     }
+}
+
+pub fn is_directory(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
 }
 
 pub fn ensure_exists(path: &Path) -> Result<()> {
@@ -355,7 +362,7 @@ pub fn format_mod_time(mod_time: chrono::DateTime<Utc>) -> String {
     format!("{} ({})", timestamp, formatter.convert(std_duration))
 }
 
-pub fn shorten(hash: &String, abbrev: Option<i32>) -> String {
+pub fn shorten(hash: &str, abbrev: Option<i32>) -> String {
     let n = abbrev.unwrap_or(hash.len() as i32) as usize;
     hash.chars().take(n).collect()
 }

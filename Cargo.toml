@@ -1,9 +1,10 @@
 [package]
 name = "scidataflow"
-version = "0.8.7"
+version = "0.8.8"
 edition = "2021"
 exclude = ["logo.png", "tests/test_data/**"]
 license = "MIT"
+authors = ["Vince Buffalo <vsbuffalo@gmail.com>"]
 keywords = ["science", "reproducibility", "bioinformatics", "data"]
 categories = ["command-line-utilities", "science"]
 repository = "https://github.com/vsbuffalo/scidataflow"
