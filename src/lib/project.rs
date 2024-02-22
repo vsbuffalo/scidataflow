@@ -482,10 +482,10 @@ impl Project {
             }
 
             // move the actual file
-            rename(source, destination_path).context("Error encountered when moving file.")?;
+            rename(source, &destination_path).context("Error encountered when moving file.")?;
 
             // update the relative path
-            let relative_destination = self.relative_path_string(Path::new(destination))?;
+            let relative_destination = self.relative_path_string(destination_path.as_path())?;
 
             // modify the DataFile
             let mut new_file = file.clone();

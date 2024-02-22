@@ -13,6 +13,7 @@ mod tests {
     use super::get_statuses;
     use super::setup;
     use scidataflow::lib::data::LocalStatusCode;
+    use std::fs;
     use std::path::PathBuf;
 
     #[tokio::test]
@@ -159,5 +160,52 @@ mod tests {
                 };
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_mv() {
+        let mut fixture = setup(false).await;
+        let path_context = fixture.project.path_context();
+        let statuses = get_statuses(&mut fixture, &path_context).await;
+
+        // at this point the status should be empty
+        assert!(statuses.is_empty());
+
+        // get the files to add
+        let files = &fixture.env.files.as_ref().unwrap();
+        let add_files: Vec<String> = files
+            .into_iter()
+            .filter(|f| f.add)
+            .map(|f| f.path.clone())
+            .collect();
+
+        // add those files
+        let _ = fixture.project.add(&add_files).await;
+
+        let new_name = "data/data_alt.tsv";
+        let target_path = PathBuf::from(new_name);
+
+        let statuses = get_statuses(&mut fixture, &path_context).await;
+        let exists = statuses.iter().any(|(path, _status)| path == &target_path);
+        assert!(!exists); // not there before move
+
+        // try moving a file (renaming)
+        fixture.project.mv("data/data.tsv", new_name).await.unwrap();
+
+        let exists = statuses.iter().any(|(path, _status)| path == &target_path);
+        assert!(!exists); // now it should be there
+
+        // now let's try moving to a directory
+        fs::create_dir_all("new_data/").unwrap();
+        fixture
+            .project
+            .mv("data/supplement/big_1.tsv.gz", "new_data/")
+            .await
+            .unwrap();
+
+        let statuses = get_statuses(&mut fixture, &path_context).await;
+        let target_path = PathBuf::from("data/supplement/big_1.tsv.gz");
+        let exists = statuses.iter().any(|(path, _status)| path == &target_path);
+        assert!(!exists); // now it should be there
     }
 }
