@@ -57,10 +57,21 @@ pub struct ZenodoFileUpload {
     delete_marker: bool,
 }
 
+// NOTE: this is a shim to address issue #16. This is caused by an upstream
+// bug in Zenodo.
+fn deserialize_filesize<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let filesize_float: f64 = serde::Deserialize::deserialize(deserializer)?;
+    Ok(filesize_float.trunc() as usize)
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ZenodoFile {
     checksum: String,
     filename: String,
+    #[serde(deserialize_with = "deserialize_filesize")]
     filesize: usize,
     id: String,
     links: ZenodoLinks,
