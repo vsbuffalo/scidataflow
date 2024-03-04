@@ -199,6 +199,11 @@ enum Commands {
     /// Pull in all tracked files from the remote. If --urls is set,
     /// this will (re)-download all files (tracked or not) in that manifest
     /// from their URLs.
+    ///
+    /// Note that if --overwrite is set, this will append the suffix '.tmp'
+    /// to each file that will be replaced, and those files will be removed
+    /// after the download is successful. While safer, this does temporarily
+    /// increase disk usage.
     Pull {
         /// Overwrite local files if they exit.
         #[arg(long)]

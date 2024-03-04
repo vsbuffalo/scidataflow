@@ -105,15 +105,19 @@ impl Downloads {
         let total_files = downloads.len();
         if !downloads.is_empty() {
             // Let's handle the file operations:
-            // 1) Delete the files if they exist, since if it's in the queue, it's
-            //    overwrite-safe.
+            // 1) Move all the files to temporary destinations
             // 2) Create the directory structure if it does not exist.
+            let mut temp_files = Vec::new();
             for file in downloads {
                 let path = PathBuf::from(&file.filename);
                 if path.exists() {
-                    fs::remove_file(&path)?;
+                    // rather than delete, we move the file
+                    let temp_file_path = path.with_extension(".tmp");
+                    fs::rename(&path, &temp_file_path)?;
+                    temp_files.push(temp_file_path);
                 }
 
+                // recreate the directory structure if not there
                 if let Some(parent_dir) = path.parent() {
                     if !parent_dir.exists() {
                         fs::create_dir_all(parent_dir)?;
@@ -124,7 +128,16 @@ impl Downloads {
             let downloader = DownloaderBuilder::new()
                 .style_options(self.default_style()?)
                 .build();
+
+            // download everything
             downloader.download(downloads).await;
+
+            // now remove the temp files
+            for temp_file_path in temp_files {
+                if temp_file_path.exists() {
+                    fs::remove_file(temp_file_path)?;
+                }
+            }
             if show_total {
                 let punc = if total_files > 0 { "." } else { ":" };
                 println!(
