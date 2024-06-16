@@ -397,11 +397,11 @@ impl DataFile {
     pub fn directory(&self) -> Result<String> {
         let path = std::path::Path::new(&self.path);
         Ok(path
-           .parent()
-           .unwrap_or(path)
-           .to_str()
-           .unwrap_or("")
-           .to_string())
+            .parent()
+            .unwrap_or(path)
+            .to_str()
+            .unwrap_or("")
+            .to_string())
     }
 
     pub async fn get_md5(&self, path_context: &Path) -> Result<Option<String>> {
@@ -794,7 +794,7 @@ impl DataCollection {
             match result {
                 Ok((key, value)) => {
                     pb.bar
-                      .set_message(format!("Fetching remote files...   {} done.", key.0));
+                        .set_message(format!("Fetching remote files...   {} done.", key.0));
                     all_remote_files.insert(key, value);
                     pb.bar.inc(1);
                 }
@@ -913,7 +913,7 @@ impl DataCollection {
         while let Some(result) = statuses_futures.next().await {
             if let Ok((key, value)) = result {
                 pb.bar
-                  .set_message(format!("Calculating MD5s... {} done.", &value.name));
+                    .set_message(format!("Calculating MD5s... {} done.", &value.name));
                 statuses.entry(key).or_insert_with(Vec::new).push(value);
                 pb.bar.inc(1);
             } else {
@@ -1070,8 +1070,7 @@ impl DataCollection {
         let p = PathBuf::from(local);
         if let Some(req) = request {
             p == *req || Self::has_common_ancestor(p, req)
-        }
-        else {
+        } else {
             false
         }
     }
@@ -1080,10 +1079,18 @@ impl DataCollection {
     // - "a/b/c/test.txt" and "a/b/c" have one
     // - "a/b/c/test.txt" and "b/c" and  don't
     fn has_common_ancestor(file: PathBuf, dir: &PathBuf) -> bool {
-        file.ancestors().filter(|x| !x.as_os_str().is_empty() && x == dir).count() > 0
+        file.ancestors()
+            .filter(|x| !x.as_os_str().is_empty() && x == dir)
+            .count()
+            > 0
     }
 
-    pub async fn pull_urls(&mut self, path_context: &Path, overwrite: bool, limit: &Option<PathBuf>) -> Result<()> {
+    pub async fn pull_urls(
+        &mut self,
+        path_context: &Path,
+        overwrite: bool,
+        limit: &Option<PathBuf>,
+    ) -> Result<()> {
         let mut downloads = Downloads::new();
         let mut filepaths = Vec::new();
         let mut skipped = Vec::new();
@@ -1121,19 +1128,24 @@ impl DataCollection {
         Ok(())
     }
 
-    async fn pull_get_downloads(&mut self, all_files: &HashMap<String, HashMap<String, MergedFile>>, path_context: &Path,
-                                overwrite: bool,
-                                request: &Option<PathBuf>,
-                                current_skipped: &mut Vec<String>,
-                                messy_skipped: &mut Vec<String>,
-                                overwrite_skipped: &mut Vec<String>,
-                                downloads: &mut Downloads) -> Result<()> {
+    async fn pull_get_downloads(
+        &mut self,
+        all_files: &HashMap<String, HashMap<String, MergedFile>>,
+        path_context: &Path,
+        overwrite: bool,
+        request: &Option<PathBuf>,
+        current_skipped: &mut Vec<String>,
+        messy_skipped: &mut Vec<String>,
+        overwrite_skipped: &mut Vec<String>,
+        downloads: &mut Downloads,
+    ) -> Result<()> {
         for (dir, merged_files) in all_files.iter() {
             // 1. Skip non matching files if needed
             // 2. can_download() is true only if local and remote are not None.
             // (local file can be deleted, but will only be None if not in manifest also)
-            let filtered = merged_files.iter().filter(|(k,v)| Self::match_user_file(k, request)
-                                                      && v.can_download());
+            let filtered = merged_files
+                .iter()
+                .filter(|(k, v)| Self::match_user_file(k, request) && v.can_download());
             for (_, merged_file) in filtered {
                 let path = merged_file.name()?;
                 println!("filtered {:?}", merged_file);
@@ -1191,7 +1203,12 @@ impl DataCollection {
     //
     // TODO: code redundancy with the push method's tracking of
     // why stuff is skipped; split out info enum, etc.
-    pub async fn pull(&mut self, path_context: &Path, overwrite: bool, limit: &Option<PathBuf>) -> Result<()> {
+    pub async fn pull(
+        &mut self,
+        path_context: &Path,
+        overwrite: bool,
+        limit: &Option<PathBuf>,
+    ) -> Result<()> {
         let all_files = self.merge(true).await?;
 
         let mut current_skipped = Vec::new();
@@ -1199,9 +1216,17 @@ impl DataCollection {
         let mut overwrite_skipped = Vec::new();
 
         let mut downloads = Downloads::new();
-        self.pull_get_downloads(&all_files, path_context, overwrite, limit,
-                                &mut current_skipped, &mut messy_skipped,
-                                &mut overwrite_skipped, &mut downloads).await?;
+        self.pull_get_downloads(
+            &all_files,
+            path_context,
+            overwrite,
+            limit,
+            &mut current_skipped,
+            &mut messy_skipped,
+            &mut overwrite_skipped,
+            &mut downloads,
+        )
+        .await?;
 
         // now retrieve all the files in the queue.
         downloads
