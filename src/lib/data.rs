@@ -1059,32 +1059,6 @@ impl DataCollection {
         Ok(())
     }
 
-    // Compare a local path `local` to a user request `request` (either a path or a directory)
-    // - if request is a path, the full paths of both must match exactly
-    // - otherwise request is a directory and one of the ancestor must match
-    // Exemple
-    // - "a/test.txt" would not match "test.text" (first case)
-    // - "a/b/c/test.txt" would match "a/b/c" or "a/b"  (second case)
-    // - "a/b/c/test.txt" would not match "b/c"
-    fn match_user_file(local: &String, request: &Option<PathBuf>) -> bool {
-        let p = PathBuf::from(local);
-        if let Some(req) = request {
-            p == *req || Self::has_common_ancestor(p, req)
-        } else {
-            false
-        }
-    }
-
-    // Common ancestor starting from root between a filepath and a directory
-    // - "a/b/c/test.txt" and "a/b/c" have one
-    // - "a/b/c/test.txt" and "b/c" and  don't
-    fn has_common_ancestor(file: PathBuf, dir: &PathBuf) -> bool {
-        file.ancestors()
-            .filter(|x| !x.as_os_str().is_empty() && x == dir)
-            .count()
-            > 0
-    }
-
     pub async fn pull_urls(
         &mut self,
         path_context: &Path,
@@ -1097,7 +1071,7 @@ impl DataCollection {
         let mut num_downloaded = 0;
         for data_file in self.files.values() {
             if let Some(url) = &data_file.url {
-                if !Self::match_user_file(&data_file.path, limit) {
+                if !match_user_file(&data_file.path, limit) {
                     continue;
                 }
                 let full_path = data_file.full_path(path_context)?;
@@ -1145,7 +1119,7 @@ impl DataCollection {
             // (local file can be deleted, but will only be None if not in manifest also)
             let filtered = merged_files
                 .iter()
-                .filter(|(k, v)| Self::match_user_file(k, request) && v.can_download());
+                .filter(|(k, v)| match_user_file(k, request) && v.can_download());
             for (_, merged_file) in filtered {
                 let path = merged_file.name()?;
                 println!("filtered {:?}", merged_file);
@@ -1266,7 +1240,40 @@ impl DataCollection {
 
         Ok(())
     }
+
 }
+
+
+// Common ancestor starting from root between a filepath and a directory
+// - "a/b/c/test.txt" and "a/b/c" have one
+// - "a/b/c/test.txt" and "b/c" and  don't
+fn has_common_ancestor(file: PathBuf, dir: &PathBuf) -> bool {
+    for x in file.ancestors() {
+        println!("ancestor for {:?} = {:?}", file, x);
+
+    }
+    file.ancestors()
+        .filter(|x| !x.as_os_str().is_empty() && x == dir)
+        .count()
+        > 0
+}
+
+// Compare a local path `local` to a user request `request` (either a path or a directory)
+// - if request is a path, the full paths of both must match exactly
+// - otherwise request is a directory and one of the ancestor must match
+// Exemple
+// - "a/test.txt" would not match "test.text" (first case)
+// - "a/b/c/test.txt" would match "a/b/c" or "a/b"  (second case)
+// - "a/b/c/test.txt" would not match "b/c"
+fn match_user_file(local: &String, request: &Option<PathBuf>) -> bool {
+    let p = PathBuf::from(local);
+    if let Some(req) = request {
+        p == *req || has_common_ancestor(p, req)
+    } else {
+        false
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1274,10 +1281,11 @@ mod tests {
     use crate::lib::remote::Remote;
     use crate::lib::test_utilities::check_error;
 
-    use super::{DataCollection, DataFile};
+    use super::{DataCollection, DataFile, match_user_file};
     use std::io::Write;
     use std::path::Path;
     use tempfile::NamedTempFile;
+    use std::path::{PathBuf};
 
     fn mock_data_file() -> NamedTempFile {
         let temp_file = NamedTempFile::new().unwrap();
@@ -1422,4 +1430,30 @@ mod tests {
         let result = dc.register_remote(&dir, Remote::FigShareAPI(figshare));
         check_error(result, "already tracked");
     }
+
+    #[test]
+    fn test_common_ancestor() {
+        assert!(
+            match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a"))),
+            "File and user directory should match"
+        );
+        assert!(
+            match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a/test.txt"))),
+            "File and user file should match"
+        );
+        assert!(
+            !match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("b/test.txt"))),
+            "File and user file on directory should not match (different directory)"
+        );
+        assert!(
+            !match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a/test2.txt"))),
+            "File and user file on directory should not match (different user file)"
+        );
+    assert!(
+            match_user_file(&String::from("a/b/c.txt"), &Some(PathBuf::from("a/b"))),
+            "File and user file on directory should not match (different user file)"
+        );
+
+    }
+
 }
