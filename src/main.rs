@@ -130,6 +130,10 @@ enum Commands {
         /// Show statuses of all files, including those on remote(s) but not in the manifest.
         #[arg(long)]
         all: bool,
+
+        /// Only show locally changed files.
+        #[arg(short, long)]
+        concise: bool,
     },
     /// Show file size statistics.
     Stats {},
@@ -289,9 +293,13 @@ async fn run() -> Result<()> {
             proj.bulk(filename, *column, *header, *overwrite).await
         }
         Some(Commands::Init { name }) => Project::init(name.clone()),
-        Some(Commands::Status { remotes, all }) => {
+        Some(Commands::Status {
+            remotes,
+            all,
+            concise,
+        }) => {
             let mut proj = Project::new()?;
-            proj.status(*remotes, *all).await
+            proj.status(*remotes, *all, *concise).await
         }
         Some(Commands::Stats {}) => {
             //let proj = Project::new()?;

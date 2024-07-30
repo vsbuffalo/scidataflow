@@ -130,6 +130,7 @@ println!();
 }
 }
 */
+
 // More specialized version of print_fixed_width() for statuses.
 // Handles coloring, manual annotation, etc
 pub fn print_fixed_width_status(
@@ -138,36 +139,47 @@ pub fn print_fixed_width_status(
     indent: Option<usize>,
     color: bool,
     all: bool,
+    concise: bool,
 ) {
-    //debug!("rows: {:?}", rows);
     let indent = indent.unwrap_or(0);
     let nspaces = nspaces.unwrap_or(6);
-
     let abbrev = Some(8);
 
-    // get the max number of columns (in case ragged)
-    let max_cols = rows
+    // Filter rows if concise is true
+    let filtered_rows: BTreeMap<String, Vec<StatusEntry>> = if concise {
+        rows.into_iter()
+            .map(|(key, statuses)| {
+                let filtered_statuses: Vec<StatusEntry> = statuses
+                    .into_iter()
+                    .filter(|status| status.is_changed())
+                    .collect();
+                (key, filtered_statuses)
+            })
+            .filter(|(_, statuses)| !statuses.is_empty())
+            .collect()
+    } else {
+        rows
+    };
+
+    let max_cols = filtered_rows
         .values()
         .flat_map(|v| v.iter())
         .map(|entry| entry.columns(abbrev).len())
         .max()
         .unwrap_or(0);
-
     let mut max_lengths = vec![0; max_cols];
 
-    // compute max lengths across all rows
-    for status in rows.values().flat_map(|v| v.iter()) {
+    for status in filtered_rows.values().flat_map(|v| v.iter()) {
         let cols = status.columns(abbrev);
         for (i, col) in cols.iter().enumerate() {
-            max_lengths[i] = max_lengths[i].max(col.len()); // Assuming col is a string
+            max_lengths[i] = max_lengths[i].max(col.len());
         }
     }
 
-    // print status table
-    let mut dir_keys: Vec<&String> = rows.keys().collect();
+    let mut dir_keys: Vec<&String> = filtered_rows.keys().collect();
     dir_keys.sort();
     for key in dir_keys {
-        let statuses = &rows[key];
+        let statuses = &filtered_rows[key];
         let pretty_key = if key.is_empty() { "." } else { key };
         let prettier_key = if color {
             pretty_key.bold().to_string()
@@ -176,16 +188,13 @@ pub fn print_fixed_width_status(
         };
         println!("[{}]", prettier_key);
 
-        // Print the rows with the correct widths
         for status in statuses {
             if status.local_status.is_none() && !all {
-                // ignore things that aren't in the manifest, unless --all
                 continue;
             }
             let cols = status.columns(abbrev);
             let mut fixed_row = Vec::new();
             for (i, col) in cols.iter().enumerate() {
-                // push a fixed-width column to vector
                 let spacer = if i == 0 { " " } else { "" };
                 let fixed_col = format!("{}{:width$}", spacer, col, width = max_lengths[i]);
                 fixed_row.push(fixed_col);
@@ -295,6 +304,7 @@ pub fn print_status(
     rows: BTreeMap<String, Vec<StatusEntry>>,
     remote: Option<&HashMap<String, Remote>>,
     all: bool,
+    concise: bool,
 ) {
     println!("{}", "Project data status:".bold());
     let counts = get_counts(&rows).expect("Internal Error: get_counts() panicked.");
@@ -325,7 +335,7 @@ pub fn print_status(
         None => rows,
     };
 
-    print_fixed_width_status(rows_by_dir, None, None, true, all);
+    print_fixed_width_status(rows_by_dir, None, None, true, all, concise);
 }
 
 pub fn format_bytes(size: u64) -> String {

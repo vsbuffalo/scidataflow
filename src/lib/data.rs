@@ -43,6 +43,9 @@ pub struct StatusEntry {
 }
 
 impl StatusEntry {
+    pub fn is_changed(&self) -> bool {
+        self.local_status != Some(LocalStatusCode::Current)
+    }
     fn local_md5_column(&self, abbrev: Option<i32>) -> Result<String> {
         Ok(md5_status(
             self.local_md5.as_ref(),
