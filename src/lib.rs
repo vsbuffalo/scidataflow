@@ -11,6 +11,7 @@ pub mod lib {
     pub mod progress;
     pub mod project;
     pub mod remote;
+    pub mod status;
     pub mod test_utilities;
     pub mod utils;
 }

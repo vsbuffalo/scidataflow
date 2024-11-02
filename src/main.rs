@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use log::{debug, info, trace};
 use scidataflow::lib::assets::GitHubRepo;
 use scidataflow::lib::download::Downloads;
+use scidataflow::lib::status::StatusDisplayOptions;
 use tokio::runtime::Builder;
 
 use scidataflow::lib::project::Project;
@@ -82,29 +83,29 @@ enum Commands {
     /// can be propagated to some APIs.
     Config {
         /// Your name.
-        #[arg(long)]
+        #[arg(short, long)]
         name: Option<String>,
         // Your email.
-        #[arg(long)]
+        #[arg(short, long)]
         email: Option<String>,
         // Your affiliation.
-        #[arg(long)]
+        #[arg(short, long)]
         affiliation: Option<String>,
     },
     /// Initialize a new project.
     Init {
         /// Project name (default: the name of the directory).
-        #[arg(long)]
+        #[arg(short, long)]
         name: Option<String>,
     },
     /// Download a file from a URL.
     Get {
         /// Download filename (default: based on URL).
         url: String,
-        #[arg(long)]
+        #[arg(short, long)]
         name: Option<String>,
         /// Overwrite local files if they exit.
-        #[arg(long)]
+        #[arg(short, long)]
         overwrite: bool,
     },
     /// Download a bunch of files from links stored in a file.
@@ -112,24 +113,19 @@ enum Commands {
         /// A TSV or CSV file containing a column of URLs. Type inferred from suffix.
         filename: String,
         /// Which column contains links (default: first).
-        #[arg(long)]
+        #[arg(short, long)]
         column: Option<u64>,
         /// The TSV or CSV starts with a header (i.e. skip first line).
-        #[arg(long)]
+        #[arg(short, long)]
         header: bool,
         /// Overwrite local files if they exit.
-        #[arg(long)]
+        #[arg(short, long)]
         overwrite: bool,
     },
     /// Show status of data.
     Status {
-        /// Show remotes status (requires network).
-        #[arg(long)]
-        remotes: bool,
-
-        /// Show statuses of all files, including those on remote(s) but not in the manifest.
-        #[arg(long)]
-        all: bool,
+        #[clap(flatten)]
+        display_options: StatusDisplayOptions,
     },
     /// Show file size statistics.
     Stats {},
@@ -139,7 +135,7 @@ enum Commands {
         #[arg(required = false)]
         filenames: Vec<String>,
         /// Update all files presently registered in the manifest.
-        #[arg(long)]
+        #[arg(short, long)]
         all: bool,
     },
     /// Remove a file from the manifest
@@ -151,10 +147,10 @@ enum Commands {
     /// Retrieve a SciDataFlow Asset
     Asset {
         /// A GitHub link
-        #[arg(long)]
+        #[arg(short, long)]
         github: Option<String>,
         /// A URL to a data_manifest.yml file
-        #[arg(long)]
+        #[arg(short, long)]
         url: Option<String>,
         /// A SciDataFlow Asset name
         asset: Option<String>,
@@ -169,13 +165,13 @@ enum Commands {
         key: String,
         /// Project name for remote (default: the metadata title in the data
         /// manifest, or if that's not set, the directory name).
-        #[arg(long)]
+        #[arg(short, long)]
         name: Option<String>,
 
         /// Don't initialize remote, only add to manifest. This will retrieve
         /// the remote information (i.e. the FigShare Article ID or Zenodo
         /// Depository ID) to add to the manifest. Requires network.
-        #[arg(long)]
+        #[arg(short, long)]
         link_only: bool,
     },
     /// No longer keep track of this file on the remote.
@@ -193,7 +189,7 @@ enum Commands {
     /// Push all tracked files to remote.
     Push {
         /// Overwrite remote files if they exit.
-        #[arg(long)]
+        #[arg(short, long)]
         overwrite: bool,
     },
     /// Pull in all tracked files from the remote. If --urls is set,
@@ -206,15 +202,15 @@ enum Commands {
     /// increase disk usage.
     Pull {
         /// Overwrite local files if they exit.
-        #[arg(long)]
+        #[arg(short, long)]
         overwrite: bool,
 
         /// Pull in files from the URLs, not remotes.
-        #[arg(long)]
+        #[arg(short, long)]
         urls: bool,
 
         /// Pull in files from remotes and URLs.
-        #[arg(long)]
+        #[arg(short, long)]
         all: bool,
         // multiple optional directories
         //directories: Vec<PathBuf>,
@@ -222,10 +218,10 @@ enum Commands {
     /// Change the project metadata.
     Metadata {
         /// The project name.
-        #[arg(long)]
+        #[arg(short, long)]
         title: Option<String>,
         // A description of the project.
-        #[arg(long)]
+        #[arg(short, long)]
         description: Option<String>,
     },
 }
@@ -289,9 +285,9 @@ async fn run() -> Result<()> {
             proj.bulk(filename, *column, *header, *overwrite).await
         }
         Some(Commands::Init { name }) => Project::init(name.clone()),
-        Some(Commands::Status { remotes, all }) => {
+        Some(Commands::Status { display_options }) => {
             let mut proj = Project::new()?;
-            proj.status(*remotes, *all).await
+            proj.status(display_options).await
         }
         Some(Commands::Stats {}) => {
             //let proj = Project::new()?;

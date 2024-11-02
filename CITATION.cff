@@ -5,7 +5,7 @@ authors:
   given-names: "Vince"
   orcid: "https://orcid.org/0000-0003-4510-1609"
 title: "SciDataFlow: A Tool for Improving the Flow of Data through Science"
-version: 0.8.11
+version: 0.8.12
 doi: http://dx.doi.org/10.1093/bioinformatics/btad754
 date-released: 2024-01-05
 url: "https://github.com/vsbuffalo/scidataflow/"

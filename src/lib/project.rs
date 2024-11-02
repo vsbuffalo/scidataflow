@@ -21,6 +21,7 @@ use crate::lib::utils::{load_file, pluralize, print_status};
 #[allow(unused_imports)]
 use crate::{print_info, print_warn};
 
+use super::status::StatusDisplayOptions;
 use super::utils::is_directory;
 
 const MANIFEST: &str = "data_manifest.yml";
@@ -309,13 +310,16 @@ impl Project {
         self.save()
     }
 
-    pub async fn status(&mut self, include_remotes: bool, all: bool) -> Result<()> {
+    pub async fn status(&mut self, display_options: &StatusDisplayOptions) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.
         let path_context = &canonicalize(self.path_context())?;
-        let status_rows = self.data.status(path_context, include_remotes).await?;
-        //let remotes: Option<_> = include_remotes.then(|| &self.data.remotes);
-        print_status(status_rows, Some(&self.data.remotes), all);
+        let status_rows = self
+            .data
+            .status(path_context, display_options.remotes)
+            .await?;
+
+        print_status(status_rows, Some(&self.data.remotes), display_options);
         Ok(())
     }
 

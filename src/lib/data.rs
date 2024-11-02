@@ -921,7 +921,7 @@ impl DataCollection {
             }
         }
 
-        pb.bar.finish_with_message("Complete.");
+        pb.bar.finish_with_message("MD5 comparison complete.");
         Ok(statuses)
     }
 
