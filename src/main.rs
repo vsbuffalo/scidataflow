@@ -61,7 +61,7 @@ https://github.com/vsbuffalo/scidataflow/issues.
 
 #[derive(Parser)]
 #[clap(name = "sdf")]
-#[clap(version, about = INFO)]
+#[clap(about = INFO)]
 struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
