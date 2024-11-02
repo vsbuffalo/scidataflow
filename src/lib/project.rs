@@ -309,13 +309,26 @@ impl Project {
         self.save()
     }
 
-    pub async fn status(&mut self, include_remotes: bool, all: bool) -> Result<()> {
+    pub async fn status(
+        &mut self,
+        include_remotes: bool,
+        all: bool,
+        short: bool,
+        depth: Option<usize>,
+    ) -> Result<()> {
         // if include_remotes (e.g. --remotes) is set, we need to merge
         // in the remotes, so we authenticate first and then get them.
         let path_context = &canonicalize(self.path_context())?;
         let status_rows = self.data.status(path_context, include_remotes).await?;
         //let remotes: Option<_> = include_remotes.then(|| &self.data.remotes);
-        print_status(status_rows, Some(&self.data.remotes), all);
+        print_status(
+            status_rows,
+            Some(&self.data.remotes),
+            all,
+            short,
+            include_remotes,
+            depth,
+        );
         Ok(())
     }
 
