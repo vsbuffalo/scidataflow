@@ -587,7 +587,7 @@ impl DataCollection {
         } else {
             Err(anyhow!(
                 "File '{}' is already registered in the data manifest.\n\
-                        If you wish to update the MD5 or metadata, use: sdf update FILE",
+                 If you wish to update the MD5 or metadata, use: sdf update FILE",
                 &data_file.path
             ))
         }
@@ -719,7 +719,7 @@ impl DataCollection {
         match data_file {
             None => Err(anyhow!(
                 "Data file '{}' is not in the data manifest. Add it first using:\n \
-                                $ sdf track {}\n",
+                 $ sdf track {}\n",
                 filepath,
                 filepath
             )),
@@ -742,7 +742,7 @@ impl DataCollection {
         match data_file {
             None => Err(anyhow!(
                 "Cannot untrack data file '{}' since it was never added to\
-                                the data manifest.",
+                 the data manifest.",
                 filepath
             )),
             Some(file) => file.set_untracked(),
@@ -1059,13 +1059,21 @@ impl DataCollection {
         Ok(())
     }
 
-    pub async fn pull_urls(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
+    pub async fn pull_urls(
+        &mut self,
+        path_context: &Path,
+        overwrite: bool,
+        limit: &Option<PathBuf>,
+    ) -> Result<()> {
         let mut downloads = Downloads::new();
         let mut filepaths = Vec::new();
         let mut skipped = Vec::new();
         let mut num_downloaded = 0;
         for data_file in self.files.values() {
             if let Some(url) = &data_file.url {
+                if !match_user_file(&data_file.path, limit) {
+                    continue;
+                }
                 let full_path = data_file.full_path(path_context)?;
                 let download =
                     downloads.add(url.clone(), Some(&full_path.to_string_lossy()), overwrite)?;
@@ -1088,35 +1096,38 @@ impl DataCollection {
         let num_skipped = skipped.len();
         println!(
             "{} files were downloaded.\n\
-                  {} files were skipped because they existed (and --overwrite was not specified).",
+             {} files were skipped because they existed (and --overwrite was not specified).",
             num_downloaded, num_skipped
         );
         Ok(())
     }
 
-    // Download all files
-    //
-    // TODO: code redundancy with the push method's tracking of
-    // why stuff is skipped; split out info enum, etc.
-    pub async fn pull(&mut self, path_context: &Path, overwrite: bool) -> Result<()> {
-        let all_files = self.merge(true).await?;
-
-        let mut downloads = Downloads::new();
-
-        let mut current_skipped = Vec::new();
-        let mut messy_skipped = Vec::new();
-        let mut overwrite_skipped = Vec::new();
-
+    async fn pull_get_downloads(
+        &mut self,
+        all_files: &HashMap<String, HashMap<String, MergedFile>>,
+        path_context: &Path,
+        overwrite: bool,
+        request: &Option<PathBuf>,
+        current_skipped: &mut Vec<String>,
+        messy_skipped: &mut Vec<String>,
+        overwrite_skipped: &mut Vec<String>,
+        downloads: &mut Downloads,
+    ) -> Result<()> {
         for (dir, merged_files) in all_files.iter() {
-            // can_download() is true only if local and remote are not None.
+            // 1. Skip non matching files if needed
+            // 2. can_download() is true only if local and remote are not None.
             // (local file can be deleted, but will only be None if not in manifest also)
-            for merged_file in merged_files.values().filter(|f| f.can_download()) {
+            let filtered = merged_files
+                .iter()
+                .filter(|(k, v)| match_user_file(k, request) && v.can_download());
+            for (_, merged_file) in filtered {
                 let path = merged_file.name()?;
+                println!("filtered {:?}", merged_file);
 
                 let do_download = match merged_file.status(path_context).await? {
                     RemoteStatusCode::NoLocal => {
                         return Err(anyhow!("Internal error: execution should not have reached this point, please report.\n\
-                                           'sdf pull' filtered by MergedFile.can_download() but found a RemoteStatusCode::NoLocal status."));
+                                            'sdf pull' filtered by MergedFile.can_download() but found a RemoteStatusCode::NoLocal status."));
                     }
                     RemoteStatusCode::Current => {
                         current_skipped.push(path);
@@ -1159,6 +1170,37 @@ impl DataCollection {
                 }
             }
         }
+        Ok(())
+    }
+
+    // Download all files, or a set of matching files
+    //
+    // TODO: code redundancy with the push method's tracking of
+    // why stuff is skipped; split out info enum, etc.
+    pub async fn pull(
+        &mut self,
+        path_context: &Path,
+        overwrite: bool,
+        limit: &Option<PathBuf>,
+    ) -> Result<()> {
+        let all_files = self.merge(true).await?;
+
+        let mut current_skipped = Vec::new();
+        let mut messy_skipped = Vec::new();
+        let mut overwrite_skipped = Vec::new();
+
+        let mut downloads = Downloads::new();
+        self.pull_get_downloads(
+            &all_files,
+            path_context,
+            overwrite,
+            limit,
+            &mut current_skipped,
+            &mut messy_skipped,
+            &mut overwrite_skipped,
+            &mut downloads,
+        )
+        .await?;
 
         // now retrieve all the files in the queue.
         downloads
@@ -1198,7 +1240,40 @@ impl DataCollection {
 
         Ok(())
     }
+
 }
+
+
+// Common ancestor starting from root between a filepath and a directory
+// - "a/b/c/test.txt" and "a/b/c" have one
+// - "a/b/c/test.txt" and "b/c" and  don't
+fn has_common_ancestor(file: PathBuf, dir: &PathBuf) -> bool {
+    for x in file.ancestors() {
+        println!("ancestor for {:?} = {:?}", file, x);
+
+    }
+    file.ancestors()
+        .filter(|x| !x.as_os_str().is_empty() && x == dir)
+        .count()
+        > 0
+}
+
+// Compare a local path `local` to a user request `request` (either a path or a directory)
+// - if request is a path, the full paths of both must match exactly
+// - otherwise request is a directory and one of the ancestor must match
+// Exemple
+// - "a/test.txt" would not match "test.text" (first case)
+// - "a/b/c/test.txt" would match "a/b/c" or "a/b"  (second case)
+// - "a/b/c/test.txt" would not match "b/c"
+fn match_user_file(local: &String, request: &Option<PathBuf>) -> bool {
+    let p = PathBuf::from(local);
+    if let Some(req) = request {
+        p == *req || has_common_ancestor(p, req)
+    } else {
+        false
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -1206,10 +1281,11 @@ mod tests {
     use crate::lib::remote::Remote;
     use crate::lib::test_utilities::check_error;
 
-    use super::{DataCollection, DataFile};
+    use super::{DataCollection, DataFile, match_user_file};
     use std::io::Write;
     use std::path::Path;
     use tempfile::NamedTempFile;
+    use std::path::{PathBuf};
 
     fn mock_data_file() -> NamedTempFile {
         let temp_file = NamedTempFile::new().unwrap();
@@ -1354,4 +1430,30 @@ mod tests {
         let result = dc.register_remote(&dir, Remote::FigShareAPI(figshare));
         check_error(result, "already tracked");
     }
+
+    #[test]
+    fn test_common_ancestor() {
+        assert!(
+            match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a"))),
+            "File and user directory should match"
+        );
+        assert!(
+            match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a/test.txt"))),
+            "File and user file should match"
+        );
+        assert!(
+            !match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("b/test.txt"))),
+            "File and user file on directory should not match (different directory)"
+        );
+        assert!(
+            !match_user_file(&String::from("a/test.txt"), &Some(PathBuf::from("a/test2.txt"))),
+            "File and user file on directory should not match (different user file)"
+        );
+    assert!(
+            match_user_file(&String::from("a/b/c.txt"), &Some(PathBuf::from("a/b"))),
+            "File and user file on directory should not match (different user file)"
+        );
+
+    }
+
 }
